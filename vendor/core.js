@@ -356,14 +356,15 @@ export function textFromInteraction(resp) {
 
 // ---------- Agent Platform (generateContent) ----------
 
-// The JSON schema above, in the Schema form generateContent takes: upper-case types, and
-// enums only on strings (an integer enum is dropped; the validator checks those values).
+// The JSON schema above, in the Schema form generateContent takes: upper-case types, enums
+// only on strings (an integer enum is dropped; minimum/maximum carry a numeric range).
 export function cloudSchema(s) {
   if (!s || typeof s !== 'object') return s;
   const out = {};
   if (s.type) out.type = String(s.type).toUpperCase();
   if (s.description) out.description = s.description;
   if (Array.isArray(s.enum) && s.type === 'string') out.enum = s.enum.map(String);
+  for (const k of ['minimum', 'maximum']) if (typeof s[k] === 'number') out[k] = s[k];
   if (s.items) out.items = cloudSchema(s.items);
   if (s.properties) out.properties = Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, cloudSchema(v)]));
   if (Array.isArray(s.required)) out.required = s.required;

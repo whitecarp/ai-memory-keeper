@@ -14,24 +14,66 @@ export const MEMORY_SCHEMA = {
       type: 'object', required: ['key', 'category', 'text', 'date', 'evidence', 'rank', 'status'],
       properties: {
         key: STR, category: STR, text: STR, date: STR, evidence: STR,
-        rank: { type: 'integer', enum: [1, 2, 3, 4] },
+        rank: { type: 'integer', enum: [1, 2, 3, 4], minimum: 1, maximum: 4 },
         status: { type: 'string', enum: ['kept', 'pending', 'broken', 'unknown', 'none'] },
       },
     } },
   },
 };
+// The response schema for a profile: its categories and the rank range spelled out, so the
+// model's answer is constrained the same way on AI Studio and on Agent Platform.
+export function responseSchema(profile) {
+  const item = MEMORY_SCHEMA.properties.items.items;
+  return { ...MEMORY_SCHEMA, properties: { ...MEMORY_SCHEMA.properties, items: { ...MEMORY_SCHEMA.properties.items, items: { ...item, properties: { ...item.properties, category: { type: 'string', enum: CATEGORIES[profile] || CATEGORIES.work } } } }, persona_line: STR } };
+}
+const STATUSES = ['kept', 'pending', 'broken', 'unknown', 'none'];
+const validDate = d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d;
+// A model's answer before the strict check: what is safe to fix is fixed (key spelling,
+// rank range, date, lengths, stray fields); an item that can't be trusted is dropped (an
+// unknown category, empty text, or a quote that isn't in the chat). One bad item no longer
+// sinks the whole save. Only a broken overall shape is still an error.
+export function tidyMemory(data, profile, evidencePool, date) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.items)) bad('shape');
+  const keys = new Set(); const items = []; let dropped = 0;
+  for (const raw of data.items) {
+    if (!raw || typeof raw !== 'object') { dropped++; continue; }
+    const text = typeof raw.text === 'string' ? raw.text.trim().slice(0, 1200) : '';
+    let evidence = typeof raw.evidence === 'string' ? raw.evidence.trim() : '';
+    if (evidence.length > 240) evidence = evidence.slice(0, 240);
+    if (!text || !evidence || !CATEGORIES[profile]?.includes(raw.category)) { dropped++; continue; }
+    if (evidencePool !== undefined && !evidencePool.includes(evidence)) { dropped++; continue; }
+    let key = String(raw.key ?? '').trim().replace(/[^\p{L}\p{N}_.:-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 100);
+    if (!key) key = `${raw.category}-${items.length + 1}`;
+    if (keys.has(key)) { dropped++; continue; }
+    keys.add(key);
+    const rank = Math.min(4, Math.max(1, Math.round(Number(raw.rank)) || 4));
+    const item = { key, category: raw.category, text, date: validDate(raw.date) ? raw.date : date, evidence, rank, status: STATUSES.includes(raw.status) ? raw.status : 'none' };
+    if (raw.pinned === true) item.pinned = true;
+    items.push(item);
+  }
+  items.sort((a, b) => a.rank - b.rank);
+  dropped += Math.max(0, items.length - 200);
+  const memory = { wake_up_note: typeof data.wake_up_note === 'string' ? data.wake_up_note.slice(0, 1200) : '', items: items.slice(0, 200) };
+  return { memory, dropped };
+}
+// An invalid_memory error says which rule failed (a fixed word, never content).
+function bad(detail) {
+  try { fail('invalid_memory'); } catch (e) { e.detail = detail; throw e; }
+}
 export function validateMemory(data, profile, evidencePool) {
-  if (!data || typeof data !== 'object' || typeof data.wake_up_note !== 'string' || data.wake_up_note.length > 1200 || !Array.isArray(data.items) || data.items.length > 200) fail('invalid_memory');
+  if (!data || typeof data !== 'object' || typeof data.wake_up_note !== 'string' || data.wake_up_note.length > 1200 || !Array.isArray(data.items) || data.items.length > 200) bad('shape');
   const keys = new Set();
-  if (Object.keys(data).some(k => !['wake_up_note', 'items'].includes(k))) fail('invalid_memory');
+  if (Object.keys(data).some(k => !['wake_up_note', 'items'].includes(k))) bad('extra_field');
   for (const item of data.items) {
-    if (!item || !/^[\p{L}\p{N}_.:-]{1,100}$/u.test(item.key) || keys.has(item.key)) fail('invalid_memory');
+    if (!item || !/^[\p{L}\p{N}_.:-]{1,100}$/u.test(item.key) || keys.has(item.key)) bad('key');
     keys.add(item.key);
-    if (Object.keys(item).some(k => !['key', 'category', 'text', 'date', 'evidence', 'rank', 'status', 'pinned'].includes(k))) fail('invalid_memory');
-    if (!CATEGORIES[profile]?.includes(item.category) || ![1, 2, 3, 4].includes(item.rank) || !['kept', 'pending', 'broken', 'unknown', 'none'].includes(item.status)) fail('invalid_memory');
-    if (typeof item.text !== 'string' || !item.text.trim() || item.text.length > 1200 || typeof item.evidence !== 'string' || !item.evidence.trim() || item.evidence.length > 240) fail('invalid_memory');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date) || Number.isNaN(Date.parse(item.date)) || new Date(item.date).toISOString().slice(0, 10) !== item.date) fail('invalid_memory');
-    if (item.pinned !== undefined && typeof item.pinned !== 'boolean') fail('invalid_memory');
+    if (Object.keys(item).some(k => !['key', 'category', 'text', 'date', 'evidence', 'rank', 'status', 'pinned'].includes(k))) bad('item_field');
+    if (!CATEGORIES[profile]?.includes(item.category)) bad('category');
+    if (![1, 2, 3, 4].includes(item.rank)) bad('rank');
+    if (!STATUSES.includes(item.status)) bad('status');
+    if (typeof item.text !== 'string' || !item.text.trim() || item.text.length > 1200 || typeof item.evidence !== 'string' || !item.evidence.trim() || item.evidence.length > 240) bad('text');
+    if (!validDate(item.date)) bad('date');
+    if (item.pinned !== undefined && typeof item.pinned !== 'boolean') bad('pinned');
     if (evidencePool !== undefined && !evidencePool.includes(item.evidence)) fail('ungrounded_evidence');
   }
   return data;

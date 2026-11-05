@@ -1,9 +1,7 @@
 import { buildSingleRequest, buildChunkRequest, buildMergeRequest, splitIntoChunks, groupByTokens, callGemini, textFromInteraction } from '../vendor/core.js';
-import { MEMORY_SCHEMA, CATEGORIES, validateMemory, mergeLocal } from './memory.mjs';
+import { CATEGORIES, validateMemory, mergeLocal, responseSchema, tidyMemory } from './memory.mjs';
 import { fail, redact, redactObject } from './safety.mjs';
 
-// Same as the stored memory schema plus one optional display line from Gemini.
-const RESPONSE_SCHEMA = { ...MEMORY_SCHEMA, properties: { ...MEMORY_SCHEMA.properties, persona_line: { type: 'string' } } };
 
 // Two ways to the same Gemini models: AI Studio's Gemini API (key, free tier) and Google
 // Cloud's Agent Platform (an Agent Platform key, billed to the Cloud project, where Cloud
@@ -66,7 +64,8 @@ function adapted(body, { profile, date, old, lang }) {
     // A save runs while the user waits for her reply: Google's thinking docs say a lower
     // thinking_level cuts latency, and "low" is the lowest every free Flash model takes.
     generation_config: { ...body.generation_config, thinking_level: 'low' },
-    response_format: { type: 'text', mime_type: 'application/json', schema: RESPONSE_SCHEMA },
+    // The stored memory schema with this profile's categories, plus one optional display line.
+    response_format: { type: 'text', mime_type: 'application/json', schema: responseSchema(profile) },
   };
 }
 
@@ -80,7 +79,7 @@ export function cleanPersonaLine(value, lang = 'zh', profile = 'companion') {
   return line && [...line].length <= max ? line : '';
 }
 
-export async function extractMemory({ text, old, profile, date, engine, model = 'gemini-3.8-flash', lang = 'zh', chunkTokens = 50000, timeoutMs = 120000, maxBytes = 24576, onPersonaLine }) {
+export async function extractMemory({ text, old, profile, date, engine, model = 'gemini-3.8-flash', lang = 'zh', chunkTokens = 50000, timeoutMs = 120000, maxBytes = 24576, onPersonaLine, onDropped }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let rejectTimeout;
@@ -99,8 +98,11 @@ export async function extractMemory({ text, old, profile, date, engine, model = 
       if (line) personaLine = line;
       delete clean.persona_line;
     }
-    validateMemory(clean, profile, evidencePool);
-    return clean;
+    // Fix what's safe, drop what can't be trusted, then the strict check on the rest.
+    const { memory: tidy, dropped } = tidyMemory(clean, profile, evidencePool, date);
+    if (dropped && typeof onDropped === 'function') { try { onDropped(dropped); } catch { /* bookkeeping only */ } }
+    validateMemory(tidy, profile, evidencePool);
+    return tidy;
   };
   try {
     const chunks = splitIntoChunks(source, chunkTokens);

@@ -53,6 +53,8 @@ export function recordError(ctx, e, extra = {}) {
     if (typeof e?.syscall === 'string' && /^[a-z_]{2,20}$/.test(e.syscall)) doc.syscall = e.syscall;
     if (typeof e?.code === 'string' && /^[A-Z0-9_]{2,30}$/.test(e.code)) doc.errno = e.code;
   }
+  // Which rule an answer broke (a fixed word from memory.mjs, never content).
+  if (typeof e?.detail === 'string' && /^[a-z_]{2,20}$/.test(e.detail)) doc.detail = e.detail;
   atomic(path.join(ctx.dir, 'error.json'), doc);
 }
 function journal(ctx) {
@@ -228,9 +230,9 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         const remaining = totalDeadline - Date.now();
         if (remaining <= 0) fail('timeout');
         let personaLine = '';
-        let savedWith = ctx.model, savedVia = null;
+        let savedWith = ctx.model, savedVia = null, dropped = 0;
         // AI Studio: GEMINI_API_KEY if set, else `amk key`; Agent Platform: `amk key --cloud`.
-        const extract = async model => extractMemory({ text, old: prior.memory, profile: ctx.profile, date: job.created.slice(0, 10), model, lang: ctx.lang, engine: engine || geminiEngine({ ...(await keys()), onWait, onVia: v => { savedVia = v; } }), timeoutMs: totalDeadline - Date.now(), chunkTokens, maxBytes, onPersonaLine: line => { personaLine = line; } });
+        const extract = async model => extractMemory({ text, old: prior.memory, profile: ctx.profile, date: job.created.slice(0, 10), model, lang: ctx.lang, engine: engine || geminiEngine({ ...(await keys()), onWait, onVia: v => { savedVia = v; } }), onDropped: n => { dropped += n; }, timeoutMs: totalDeadline - Date.now(), chunkTokens, maxBytes, onPersonaLine: line => { personaLine = line; } });
         let memory = prior.memory;
         if (text.trim()) {
           try { memory = await extract(ctx.model); }
@@ -248,7 +250,7 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         // Detect a user's pin/edit made while the model was working.
         if (json(loadMemory(ctx)) !== json(prior)) fail('memory_changed_during_save');
         if (fs.existsSync(file)) atomic(path.join(ctx.dir, 'backups', `${stamp().replace(/[:.]/g, '-')}-${id}.json`), prior);
-        const doc = { ...prior, savedAt: stamp(), savedWith, ...(savedVia ? { savedVia } : {}), completed: [...prior.completed, id].slice(-1000), memory };
+        const doc = { ...prior, savedAt: stamp(), savedWith, ...(savedVia ? { savedVia } : {}), droppedItems: dropped, completed: [...prior.completed, id].slice(-1000), memory };
         atomic(file, doc);
         // Gemini's own line for the next compaction; written only after memory commits.
         if (personaLine) { lastLine = personaLine; try { atomic(path.join(ctx.dir, 'persona.json'), { line: personaLine, time: stamp() }); } catch { /* display only */ } }
@@ -296,5 +298,5 @@ export function status(ctx) {
   const recalled = read(path.join(ctx.dir, 'recall.json'), null);
   // A successful save leaves { code: null } in error.json; report that as no error.
   const failed = read(path.join(ctx.dir, 'error.json'), null);
-  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx), firstCapture: read(path.join(ctx.dir, 'capture.json'), null), lastHook: read(path.join(ctx.dir, 'hook.json'), null) };
+  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastSaveDropped: doc.droppedItems || 0, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx), firstCapture: read(path.join(ctx.dir, 'capture.json'), null), lastHook: read(path.join(ctx.dir, 'hook.json'), null) };
 }

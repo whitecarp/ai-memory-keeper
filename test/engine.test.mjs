@@ -42,12 +42,31 @@ test('daily quota and 400 are not retried; exhausted transient errors stop', asy
     assert.equal(calls, wanted);
   }
 });
-test('junk JSON, empty object, incomplete output and hallucinated evidence all reject', async () => {
+test('junk JSON, empty object and incomplete output reject; an invented quote never reaches memory', async () => {
   for (const data of [{}, { status: 'incomplete', steps: [] }, { steps: [{ type: 'model_output', content: [{ type: 'text', text: '{junk}' }] }] }, { steps: [{ type: 'model_output', content: [{ type: 'text', text: '{}' }] }] }]) {
     const adapter = geminiEngine({ key: 'fake', fetchImpl: async () => response(data) });
     await assert.rejects(extractMemory({ text: 'I prefer short answers.', old: emptyMemory(), profile: 'work', date: '2026-11-04', engine: adapter }));
   }
-  await assert.rejects(extractMemory({ text: 'I prefer short answers.', old: emptyMemory(), profile: 'work', date: '2026-11-04', engine: engine(memory([item('invented')])) }), /ungrounded_evidence/);
+  // The item with the invented quote is dropped (and counted); the rest of the save goes on.
+  let dropped = 0;
+  const out = await extractMemory({ text: 'I prefer short answers.', old: emptyMemory(), profile: 'work', date: '2026-11-04', engine: engine(memory([item('invented'), item('I prefer short answers.', { key: 'style' })])), onDropped: n => { dropped += n; } });
+  assert.equal(dropped, 1);
+  assert.deepEqual(out.items.map(i => i.evidence), ['I prefer short answers.']);
+});
+test('a sloppy answer is tidied, not thrown away: key spelling, rank range, date, unknown category, stray fields', async () => {
+  const { tidyMemory } = await import('../src/memory.mjs');
+  const pool = 'I prefer short answers. Use Postgres.';
+  const { memory: m, dropped } = tidyMemory({ wake_up_note: 'x', extra: 1, items: [
+    { key: '回复 风格', category: 'preference', text: 'short', date: '2026-1-5', evidence: 'I prefer short answers.', rank: 7, status: 'odd', note: 'stray' },
+    { key: 'db', category: 'learning', text: 'pg', date: '2026-11-04', evidence: 'Use Postgres.', rank: 1, status: 'none' },
+    { key: 'db2', category: 'decision', text: 'pg', date: '2026-11-04', evidence: 'Use MySQL.', rank: 1, status: 'none' },
+  ] }, 'work', pool, '2026-11-05');
+  assert.equal(dropped, 2); // unknown category; quote not in the chat
+  assert.deepEqual(m.items, [{ key: '回复-风格', category: 'preference', text: 'short', date: '2026-11-05', evidence: 'I prefer short answers.', rank: 4, status: 'none' }]);
+  assert.deepEqual(Object.keys(m), ['wake_up_note', 'items']);
+  const { validateMemory } = await import('../src/memory.mjs');
+  assert.doesNotThrow(() => validateMemory(m, 'work', pool));
+  assert.throws(() => validateMemory({ wake_up_note: '', items: [{ ...m.items[0], rank: 9 }] }, 'work'), e => e.code === 'invalid_memory' && e.detail === 'rank');
 });
 test('whole-job deadline covers a hanging engine and aborts transport', async () => {
   let signal;
