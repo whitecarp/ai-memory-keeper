@@ -1,7 +1,7 @@
 // Gemini娘's lines. Context lines go to the agent's model; user lines are shown
 // in the agent's own UI (Claude Code systemMessage). No images: terminals are text.
 
-const AGENT = { claude: 'Claude', codex: 'Codex' };
+const AGENT = { claude: 'Claude', codex: 'Codex', workbuddy: 'WorkBuddy' };
 const FAMILY = { claude: 'Claude', gpt: 'GPT', deepseek: 'DeepSeek', glm: 'GLM', qwen: 'Qwen', kimi: 'Kimi', gemini: 'Gemini', llama: 'Llama', other: '?' };
 
 export function contextGreeting(agent, lang = 'zh') {

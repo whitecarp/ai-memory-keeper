@@ -91,7 +91,7 @@ test('manual contract works without install and rejects ambiguous CLI flags', as
   const result = await run(args(f, 'save', ['--transcript', f.transcript]), { engine: engine() });
   assert.equal(result.processed, 1);
   assert.ok((await run(args(f, 'recall'))).includes('I prefer short answers.'));
-  const s = await run(args(f, 'status')); assert.deepEqual(s.enabled, { claude: false, codex: false });
+  const s = await run(args(f, 'status')); assert.deepEqual(s.enabled, { claude: false, codex: false, workbuddy: false });
   assert.throws(() => parse(['save', '--profile', 'work', '--profile', 'companion']), /duplicate_argument/);
   assert.throws(() => parse(['save', '--unexpected']), /invalid_arguments/);
 });

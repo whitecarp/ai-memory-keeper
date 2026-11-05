@@ -92,6 +92,7 @@ amk.cmd overlay --set preview
 - 本工具的数据：默认 `~/.ai-memory-keeper/<profile>/<project-path-hash>/`，另有本工具的安装记录。
 - Claude Code：目标项目的 `.claude/settings.local.json`。
 - Codex：目标项目的 `.codex/hooks.json`。
+- WorkBuddy：目标项目的 `.codebuddy/settings.json`（不碰用户级的 `~/.codebuddy`）。
 - 两者共享的锁目录：目标项目的 `.ai-memory-keeper/config-locks/`。
 
 不会写全局代理配置、CLAUDE.md、AGENTS.md 或代理自己的记忆。`enable` 只合并自己的钩子；`disable` 按所有权标记精确移除，不覆盖别的配置。要不要把这些本地文件加进 `.gitignore` 由你决定。
@@ -149,6 +150,7 @@ amk overlay --set off             # 关闭（--set on 重新打开）
 | --- | --- | --- |
 | Claude Code | PreCompact 保存，PostCompact 收摘要，SessionStart(compact) 带回记忆 | 真实压缩已测通过 |
 | Codex | 同上，通过项目的 `.codex/hooks.json`；压缩一结束她就在弹窗里回复，后台保存晚到的记忆随下一条消息交给 Codex（UserPromptSubmit） | 真实压缩已测通过 |
+| WorkBuddy（预览） | `amk enable --agent workbuddy`。按腾讯的钩子文档，PreCompact 保存；压缩后没有钩子，所以压缩后的第一条消息（UserPromptSubmit）把记忆带回来。手动压缩是 `/summarize`，改完要重启 WorkBuddy | 还没在真实的 WorkBuddy 压缩里测过 |
 | 其他（OpenCode、DeepSeek Harness 等） | 没有；用 `amk save` / `amk recall` 手动 | — |
 
 一手资料：[Claude Code hooks](https://code.claude.com/docs/en/hooks)、[Codex hooks](https://learn.chatgpt.com/docs/hooks)、[Gemini 模型](https://aistudio.google.com/docs/models)。

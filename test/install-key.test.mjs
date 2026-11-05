@@ -72,7 +72,7 @@ test('doctor: Node, key, agent hint, enabled hooks and the skill file to read', 
   assert.equal(d.node.ok, Number(process.versions.node.split('.')[0]) >= 22);
   assert.equal(d.key.set, false); assert.equal(d.project, f.ctx.project);
   assert.ok(fs.existsSync(d.skill) && d.next.includes(d.skill));
-  assert.deepEqual(d.enabled, { claude: false, codex: false });
+  assert.deepEqual(d.enabled, { claude: false, codex: false, workbuddy: false });
   assert.equal(detectAgent({ CLAUDECODE: '1' }), 'claude');
   assert.equal(detectAgent({ CODEX_SANDBOX: 'seatbelt' }), 'codex');
   assert.equal(detectAgent({ CODEX_HOME: 'x' }), 'unknown'); // a setting, not a sign of running inside Codex

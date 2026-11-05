@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { read } from './safety.mjs';
-import { updateCycle, REPLY_WINDOW_MS } from './cycle.mjs';
+import { updateCycle, readCycle, REPLY_WINDOW_MS } from './cycle.mjs';
 import { savingLines, savedLines, failedLines } from './persona.mjs';
 import { overlayEnabled, showOverlay } from './overlay.mjs';
 import { cleanPersonaLine } from './engine.mjs';
@@ -68,6 +68,12 @@ export function recalled(ctx, { session, pending, now = Date.now() }) {
     if (!c || c.session !== session) return { value: null };
     return { next: { ...c, owed: !!pending, recalledAt: now }, value: c };
   });
+}
+
+// WorkBuddy's first UserPromptSubmit after compaction: no hand-back has happened yet.
+export function awaitingRecall(ctx, { session }) {
+  const c = readCycle(ctx);
+  return !!(c && c.session === session && !c.recalledAt && Date.now() - c.startedAt <= 24 * 60 * 60 * 1000);
 }
 
 // UserPromptSubmit: true once, when a save that was still running at SessionStart has landed.

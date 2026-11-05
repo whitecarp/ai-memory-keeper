@@ -26,9 +26,10 @@ Do these steps in order, in the person's language. **Before anything else, tell 
 3. Turn on auto mode for **the agent you are**. `agent.guess` in the doctor output is only a hint.
    - Claude Code: `amk enable --agent claude --profile <work|companion>`
    - Codex: `amk enable --agent codex --profile <work|companion>`. Then tell them, in one sentence: Codex runs these hooks only after a one-time OK. They trust this project and approve the four "AI Memory Keeper" hooks (app: **Review hooks**, or **Settings > Hooks**; CLI: `/hooks`). If an older version was enabled here, `amk enable` upgrades its hooks in place, and Codex asks for that OK again.
+   - WorkBuddy (preview, not yet tested in a real WorkBuddy compaction): `amk enable --agent workbuddy --profile <work|companion>`. Then tell them, in one sentence: restart WorkBuddy so it loads the project hooks; compaction there is `/summarize`, and the memories come back with the first message after it.
    - Any other agent: don't enable anything. Tell them auto mode works in Claude Code and Codex. Here they can save and recall by hand with `amk save --transcript FILE` and `amk recall`.
 
-   This changes only the project's own hook file (`.claude/settings.local.json` or `.codex/hooks.json`). Never edit global agent settings. The hooks find the stored key by themselves, so the agent doesn't need restarting.
+   This changes only the project's own hook file (`.claude/settings.local.json`, `.codex/hooks.json` or `.codebuddy/settings.json`). Never edit global agent settings. The hooks find the stored key by themselves, so the agent doesn't need restarting.
 
 4. Show her: on Windows, `amk overlay --set preview`. The guardian pops up in a corner of this window, first sorting memories, then with a short line.
 

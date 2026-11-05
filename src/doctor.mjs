@@ -27,9 +27,9 @@ export function doctor(ctx, env = process.env) {
       ? { version: process.version, ok: true }
       : { version: process.version, ok: false, needs: 'Node.js 22 or newer', get: 'Windows: winget install OpenJS.NodeJS.LTS · macOS: brew install node · or https://nodejs.org' },
     key: keyStatus(ctx, env),
-    agent: { guess: agent, autoMode: agent === 'unknown' ? 'Auto mode works in Claude Code and Codex; other agents use amk save / amk recall by hand' : 'supported' },
+    agent: { guess: agent, autoMode: agent === 'unknown' ? 'Auto mode works in Claude Code and Codex (WorkBuddy: preview); other agents use amk save / amk recall by hand' : 'supported' },
     project: ctx.project,
-    enabled: { claude: on('claude'), codex: on('codex') },
+    enabled: { claude: on('claude'), codex: on('codex'), workbuddy: on('workbuddy') },
     overlay: overlaySupported() ? 'Windows desktop pop-up' : 'not on this system; her words show as text only',
     skill: SKILL,
     next: `Read ${SKILL} and follow it.`,

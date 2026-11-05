@@ -75,10 +75,13 @@ const KNOWN_TYPES = new Set(['user', 'assistant', 'system', 'progress', 'file-hi
 export function transcriptText(raw, format) {
   if (format !== 'jsonl') return raw;
   const lines = [];
-  let records = 0, recognized = 0;
+  let records = 0, recognized = 0, firstShape = [];
+  const seenTypes = new Set();
   for (const line of raw.split(/\r?\n/).filter(Boolean)) {
     let record; try { record = JSON.parse(line); } catch { fail('invalid_transcript'); }
     records++;
+    if (records === 1 && record && typeof record === 'object' && !Array.isArray(record)) firstShape = Object.keys(record).sort();
+    if (typeof record?.type === 'string' && seenTypes.size < 8) seenTypes.add(record.type);
     if (KNOWN_TYPES.has(record?.type)) recognized++;
     if (record.type === 'summary' || record.type === 'compacted' || record.isCompactSummary) continue;
     // Only conversation records carry the user's and the agent's words. Everything else
@@ -92,8 +95,12 @@ export function transcriptText(raw, format) {
     const text = contentText(message.content);
     if (text) lines.push(`[${String(record.timestamp || '').slice(0, 10)}] ${message.role}: ${text}`);
   }
-  // A file in an entirely unknown format stays queued instead of being read as empty.
-  if (records && !recognized) fail('unsupported_transcript_record');
+  // A file in an entirely unknown format stays queued instead of being read as empty. The
+  // error carries the first record's key names and the type values seen (never content).
+  if (records && !recognized) {
+    try { fail('unsupported_transcript_record'); }
+    catch (e) { e.shape = firstShape; e.types = [...seenTypes]; throw e; }
+  }
   return lines.join('\n');
 }
 export function latestSummary(raw) {

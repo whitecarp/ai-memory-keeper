@@ -9,9 +9,13 @@ const registry = ctx => path.join(ctx.home, 'installations', hash(ctx.project));
 // Project-local, tool-owned coordination is shared even by different --home roots.
 const configLocks = ctx => path.join(ctx.project, '.ai-memory-keeper', 'config-locks');
 export function installationFile(ctx, agent) { return path.join(registry(ctx), agent + '.json'); }
+// WorkBuddy runs the CodeBuddy agent: Tencent's hook docs (WorkBuddy Enterprise, CodeBuddy IDE)
+// put project hooks in <workspace>/.codebuddy/settings.json. Never the user-level ~/.codebuddy.
+export const AGENTS = ['claude', 'codex', 'workbuddy'];
 function agentFile(ctx, agent) {
   if (agent === 'claude') return path.join(ctx.project, '.claude', 'settings.local.json');
   if (agent === 'codex') return path.join(ctx.project, '.codex', 'hooks.json');
+  if (agent === 'workbuddy') return path.join(ctx.project, '.codebuddy', 'settings.json');
   fail('agent_manual_only');
 }
 const shellQuote = s => `'${s.replace(/'/g, `'"'"'`)}'`;
@@ -19,9 +23,23 @@ const psQuote = s => `'${s.replace(/'/g, "''")}'`;
 // UserPromptSubmit hands the model a save that landed after SessionStart had already run,
 // once, on the next message (both agents document additionalContext for it; it takes no matcher).
 export const HOOK_EVENTS = ['PreCompact', 'PostCompact', 'SessionStart', 'UserPromptSubmit'];
+// WorkBuddy's documented events have PreCompact (trigger manual = /summarize, or auto) but no
+// PostCompact, and SessionStart fires on startup only. So the first UserPromptSubmit after
+// compaction brings the memories back (its documented hookSpecificOutput.additionalContext).
+// Commands run in a shell (CodeBuddy's CLI docs: Git Bash on Windows), so they're shell-quoted;
+// timeouts are in seconds.
+function workbuddyEntries(ctx, args) {
+  const handler = { type: 'command', command: [process.execPath, ...args].map(shellQuote).join(' '), timeout: 10 };
+  return [
+    { event: 'PreCompact', group: { matcher: 'manual', hooks: [handler] } },
+    { event: 'PreCompact', group: { matcher: 'auto', hooks: [handler] } },
+    { event: 'UserPromptSubmit', group: { hooks: [handler] } },
+  ];
+}
 export function hookEntries(ctx, agent, owner) {
   const args = [cliPath, 'hook', '--project', ctx.project, '--home', ctx.home, '--profile', ctx.profile, '--model', ctx.model, '--lang', ctx.lang, '--agent', agent, '--owner', owner];
   if (ctx.name) args.push('--name', ctx.name);
+  if (agent === 'workbuddy') return workbuddyEntries(ctx, args);
   return HOOK_EVENTS.map(event => {
     const zh = ctx.lang !== 'en';
     const label = { PreCompact: zh ? '保存记忆' : 'saving memories', PostCompact: zh ? '收下摘要' : 'taking the summary', SessionStart: zh ? '带回记忆' : 'bringing memories back', UserPromptSubmit: zh ? '补上迟到的记忆' : 'late memories' }[event];

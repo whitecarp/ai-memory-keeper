@@ -42,6 +42,10 @@ export function recordError(ctx, e, extra = {}) {
   if (Number.isInteger(e?.httpStatus)) doc.httpStatus = e.httpStatus;
   if (Array.isArray(extra.retries) && extra.retries.length) doc.retries = extra.retries.slice(-6);
   if (typeof extra.event === 'string' && /^[A-Za-z]{3,24}$/.test(extra.event)) doc.event = extra.event;
+  // An undocumented transcript format: its file type and record shape (key names only).
+  if (typeof extra.ext === 'string' && /^\.[A-Za-z0-9]{1,8}$/.test(extra.ext)) doc.transcriptExt = extra.ext.toLowerCase();
+  if (Array.isArray(e?.shape)) doc.recordShape = e.shape.filter(k => typeof k === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,23}$/.test(k)).slice(0, 12);
+  if (Array.isArray(e?.types)) doc.recordTypes = e.types.filter(k => typeof k === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]{0,23}$/.test(k)).slice(0, 8);
   if (doc.code === 'operation_failed') {
     // Where in our own code, and the system error code (e.g. EBUSY): never a message or data.
     const at = String(e?.stack || '').match(/[\/](?:src|vendor)[\/]([w.-]+.m?js):(d+)/);

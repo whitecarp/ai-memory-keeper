@@ -14,7 +14,7 @@ import { keyStatus, resolveKey, resolveCloudKey, saveKey, clearKey, openKeyWindo
 import { doctor } from './doctor.mjs';
 import { spawnOutside } from './outside.mjs';
 import { beginCycle, cycleStatus } from './cycle.mjs';
-import { compactionFinished, saveLanded, saveFailed, recalled, lateDue } from './reply.mjs';
+import { compactionFinished, saveLanded, saveFailed, recalled, lateDue, awaitingRecall } from './reply.mjs';
 
 export function parse(argv) {
   const [command = 'help', ...rest] = argv; const options = {};
@@ -54,8 +54,8 @@ const HELP = `AI Memory Keeper · amk (also: ai-memory-keeper), Node 22+
   key --terminal | --clear        Type it in this terminal instead (hidden), or remove it
   key --cloud                     The same for a Google Cloud Agent Platform key (Cloud billing)
   route --set auto|cloud          Which goes first: AI Studio (auto, default) or Agent Platform
-  enable --agent claude|codex       Merge only this tool's project hooks
-  disable --agent claude|codex      Remove exactly those hooks
+  enable --agent claude|codex|workbuddy   Merge only this tool's project hooks
+  disable --agent claude|codex|workbuddy  Remove exactly those hooks
   status                          Last save/recall/error, queued jobs, local model check
   save --transcript FILE           Save new .txt/.jsonl content using Gemini
   save --transcript FILE --background  Queue and return immediately
@@ -75,11 +75,11 @@ export async function run(argv, dependencies = {}) {
   if (command === 'help' || command === '--help') return HELP;
   const ctx = context(options);
   const start = dependencies.startWorker || startWorker;
-  let hookEvent = null;
+  let hookEvent = null, hookTranscript = null;
   try {
     if (command === 'enable') return enable(ctx, options.agent);
     if (command === 'disable') return disable(ctx, options.agent);
-    if (command === 'status') return { ...status(ctx), lastCompaction: cycleStatus(ctx), key: keyStatus(ctx), overlay: { enabled: overlayEnabled(ctx), supported: overlaySupported() }, enabled: { claude: enabled(ctx, 'claude'), codex: enabled(ctx, 'codex') } };
+    if (command === 'status') return { ...status(ctx), lastCompaction: cycleStatus(ctx), key: keyStatus(ctx), overlay: { enabled: overlayEnabled(ctx), supported: overlaySupported() }, enabled: { claude: enabled(ctx, 'claude'), codex: enabled(ctx, 'codex'), workbuddy: enabled(ctx, 'workbuddy') } };
     if (command === 'doctor') return doctor(ctx);
     if (command === 'route') {
       if (options.set) return setRoute(ctx, options.set);
@@ -168,21 +168,58 @@ export async function run(argv, dependencies = {}) {
     if (command === 'hook') {
       const input = dependencies.input || await hookInput();
       hookEvent = typeof input?.hook_event_name === 'string' ? input.hook_event_name : null;
+      hookTranscript = typeof input?.transcript_path === 'string' ? input.transcript_path : null;
       authorizeHook(ctx, options.agent, options.owner, input);
       const show = dependencies.showOverlay || showOverlay;
+      // Codex and WorkBuddy may end what a hook starts: the save and the pop-up start outside.
+      const outside = options.agent !== 'claude';
+      // The memories go back to the model (SessionStart in Claude Code and Codex; in WorkBuddy,
+      // which has no hook after compaction, the first UserPromptSubmit after it).
+      const handBack = async eventName => {
+        if (options.agent !== 'claude' && input.transcript_path) {
+          // Codex can run SessionStart before PostCompact, or before the summary is in the
+          // rollout: read the newest summary now so recall can compare against it.
+          try {
+            const summary = tailSummary(input.transcript_path);
+            if (summary) rememberSummary(ctx, { session_id: input.session_id, compact_summary: summary });
+          } catch { /* recall falls back to the whole memory, with a warning */ }
+        }
+        const { text, gaps, first, pending, line } = recallDetails(ctx, { transcript: input.transcript_path, session: input.session_id, agent: options.agent });
+        // Still saving: the model is owed this save's memories on the message after it lands.
+        let cycle = null; try { cycle = recalled(ctx, { session: input.session_id, pending }); } catch { /* no late delivery */ }
+        const out = text ? { hookSpecificOutput: { hookEventName: eventName, additionalContext: text } } : {};
+        // The model check reads Claude Code's records; elsewhere she makes no claim about it.
+        const persona = { agent: options.agent, lang: ctx.lang, gaps, first, pending, line, check: options.agent === 'workbuddy' ? null : modelCheck(ctx) };
+        // A top-level systemMessage is shown to the user (Claude Code: a status line; Codex: a
+        // warning; WorkBuddy's docs: 「显示给用户的系统消息」); additionalContext reaches only the model.
+        out.systemMessage = userMessage(persona);
+        // The desktop overlay works for any agent, because it does not go through the agent's UI.
+        // Where her reply to this save already popped up after compaction, don't repeat it.
+        const replied = options.agent !== 'claude' && cycle?.shown && !pending;
+        if (overlayEnabled(ctx) && !replied) {
+          try { await show(ctx, { lines: userLines(persona), lang: ctx.lang, cycle: cycle?.startedAt ?? null, outside }); }
+          catch { /* the overlay is decoration; never affect the hook */ }
+        }
+        return Object.keys(out).length ? out : '';
+      };
       if (input.hook_event_name === 'PreCompact') {
         if (!input.transcript_path) fail('transcript_unavailable');
         const captured = enqueue(ctx, input.transcript_path, input.session_id);
         const cycle = beginCycle(ctx, { session: input.session_id, agent: options.agent });
-        await start(ctx, { outside: options.agent === 'codex' });
+        // WorkBuddy has no hook after compaction: count it as finished now, so her reply pops
+        // up as soon as the save lands.
+        if (options.agent === 'workbuddy') { try { await compactionFinished(ctx, { session: input.session_id, agent: options.agent, display: false }); } catch { /* display only */ } }
+        await start(ctx, { outside });
         // Gemini娘 appears as compaction starts and stays until her reply.
         if (overlayEnabled(ctx)) {
-          try { await show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang, { partial: captured.skippedOlderBytes > 0 }), lang: ctx.lang, transcript: input.transcript_path, cycle, outside: options.agent === 'codex' }); }
+          try { await show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang, { partial: captured.skippedOlderBytes > 0 }), lang: ctx.lang, transcript: options.agent === 'workbuddy' ? null : input.transcript_path, cycle, outside }); }
           catch { /* decoration only */ }
         }
         return ''; // No blocking decision, no raw text, no inherited child pipes.
       }
       if (input.hook_event_name === 'UserPromptSubmit') {
+        // WorkBuddy: the first message after compaction is when the memories go back.
+        if (options.agent === 'workbuddy' && awaitingRecall(ctx, { session: input.session_id })) return await handBack('UserPromptSubmit');
         // A save that was still running when SessionStart handed over the memories: once
         // it lands, the model gets it with the next message, once. Otherwise nothing at all.
         if (!lateDue(ctx, { session: input.session_id })) return '';
@@ -204,35 +241,13 @@ export async function run(argv, dependencies = {}) {
         } else rememberSummary(ctx, input);
         return '';
       }
-      if (options.agent === 'codex' && input.transcript_path) {
-        // Codex can run SessionStart before PostCompact, or before the summary is in the
-        // rollout: read the newest summary now so recall can compare against it.
-        try {
-          const summary = tailSummary(input.transcript_path);
-          if (summary) rememberSummary(ctx, { session_id: input.session_id, compact_summary: summary });
-        } catch { /* recall falls back to the whole memory, with a warning */ }
-      }
-      const { text, gaps, first, pending, line } = recallDetails(ctx, { transcript: input.transcript_path, session: input.session_id, agent: options.agent });
-      // Still saving: the model is owed this save's memories on the message after it lands.
-      let cycle = null; try { cycle = recalled(ctx, { session: input.session_id, pending }); } catch { /* no late delivery */ }
-      const out = text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
-      const persona = { agent: options.agent, lang: ctx.lang, gaps, first, pending, line, check: modelCheck(ctx) };
-      // Both agents show a top-level systemMessage to the user (Claude Code as a status line,
-      // Codex as a warning in the UI, per its hooks docs); additionalContext only reaches the model.
-      out.systemMessage = userMessage(persona);
-      // The desktop overlay works for any agent, because it does not go through the agent's UI.
-      // In Codex her reply to this save already popped up after compaction: don't repeat it.
-      const replied = options.agent === 'codex' && cycle?.shown && !pending;
-      if (overlayEnabled(ctx) && !replied) {
-        try { await show(ctx, { lines: userLines(persona), lang: ctx.lang, cycle: cycle?.startedAt ?? null, outside: options.agent === 'codex' }); }
-        catch { /* the overlay is decoration; never affect the hook */ }
-      }
-      return Object.keys(out).length ? out : '';
+      return await handBack('SessionStart');
     }
     fail('unknown_command');
   } catch (error) {
     // drain() has already written a fuller record (with retries and model switches): keep it.
-    try { if (!error?.recorded) recordError(ctx, error, { event: hookEvent }); } catch { /* Do not print filesystem paths or raw errors. */ }
+    // The transcript's file type helps when an agent's format isn't documented (WorkBuddy).
+    try { if (!error?.recorded) recordError(ctx, error, { event: hookEvent, ext: hookTranscript ? path.extname(hookTranscript) : null }); } catch { /* Do not print filesystem paths or raw errors. */ }
     if (command === 'hook') return ''; // Always allow compaction, even on a bad input.
     if (command === 'worker' && safeCode(error) === 'busy') return { busy: true };
     throw error;
