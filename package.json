@@ -1,0 +1,28 @@
+{
+  "name": "ai-memory-keeper",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Keeps what matters in your AI agent's chats across context compaction (Claude Code, Codex), sorted by your own Gemini API key. Not a Google product.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/whitecarp/ai-memory-keeper",
+  "repository": { "type": "git", "url": "git+https://github.com/whitecarp/ai-memory-keeper.git" },
+  "engines": { "node": ">=22" },
+  "bin": { "amk": "src/cli.mjs", "ai-memory-keeper": "src/cli.mjs" },
+  "files": [
+    "src/",
+    "skills/",
+    "vendor/",
+    "tools/check-frames.mjs",
+    "assets/gemini-overlay-closed-mouth.png",
+    "assets/gemini-overlay-blink.png",
+    "assets/gemini-overlay-talk.png",
+    "assets/gemini-overlay-working.png",
+    "assets/gemini-overlay-alert.png",
+    "assets/frames.json",
+    "assets/ART-NOTICE.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": { "test": "node --test test/*.test.mjs", "demo": "node test/demo.mjs" }
+}

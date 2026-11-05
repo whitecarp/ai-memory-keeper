@@ -1,0 +1,33 @@
+{
+  "note": "Checked by tools/check-frames.mjs. The overlay copies only each box from these frames into the base, and ignores a frame whose file has changed since.",
+  "blink": {
+    "file": "gemini-overlay-blink.png",
+    "base": "gemini-overlay-closed-mouth.png",
+    "box": [
+      356,
+      196,
+      544,
+      332
+    ],
+    "sha256": "bccb2ceafa3116ff25baaf384d09e232fb265c1aaf02342e518022fe24bf1ff3",
+    "baseSha256": "0a27e9ce88b6b4ee5917ee6ac042904b11e2c2c3935769dba151c2753346773d",
+    "checked": "2026-11-05",
+    "wholeFigureDiffers": 1.608,
+    "changedInBox": 4252
+  },
+  "talk": {
+    "file": "gemini-overlay-talk.png",
+    "base": "gemini-overlay-closed-mouth.png",
+    "box": [
+      432,
+      308,
+      484,
+      360
+    ],
+    "sha256": "fd5330d34a112bbc3e9ca1df4123263dea14088110deb0f9cebd2a0800bca4ea",
+    "baseSha256": "0a27e9ce88b6b4ee5917ee6ac042904b11e2c2c3935769dba151c2753346773d",
+    "checked": "2026-11-05",
+    "wholeFigureDiffers": 0.414,
+    "changedInBox": 159
+  }
+}

@@ -1,0 +1,216 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { fail, hash, stamp, mkdir, read, atomic, noLinks, withLock, safeCode, json, redact, redactObject } from './safety.mjs';
+import { validateMemory, transcriptText, latestSummary, gapRecall, gapItems } from './memory.mjs';
+import { extractMemory, geminiEngine, cleanPersonaLine } from './engine.mjs';
+import { MODELS } from '../vendor/core.js';
+import { recordAudit, modelCheck } from './audit.mjs';
+import { resolveKey } from './key.mjs';
+
+export function context(options = {}) {
+  const project = fs.realpathSync(path.resolve(options.project || process.cwd()));
+  const profile = options.profile || 'work';
+  if (!['work', 'companion'].includes(profile)) fail('invalid_profile');
+  const name = options.name || '';
+  if (name && !/^[a-zA-Z0-9_-]{1,40}$/.test(name)) fail('invalid_name');
+  const identity = process.platform === 'win32' ? project.toLowerCase() : project;
+  const projectId = `${name ? name + '-' : ''}${hash(identity).slice(0, 20)}`;
+  const home = path.resolve(options.home || path.join(os.homedir(), '.ai-memory-keeper'));
+  const dir = path.join(home, profile, projectId);
+  noLinks(dir);
+  return { project, profile, home, dir, projectId, name, model: options.model || 'gemini-3.8-flash', lang: options.lang || 'zh' };
+}
+export const emptyMemory = () => ({ wake_up_note: '', items: [] });
+export function loadMemory(ctx) {
+  const doc = read(path.join(ctx.dir, 'memory.json'), null);
+  if (!doc) return { version: 1, projectId: ctx.projectId, profile: ctx.profile, savedAt: null, completed: [], memory: emptyMemory() };
+  if (doc.version !== 1 || doc.projectId !== ctx.projectId || doc.profile !== ctx.profile || !Array.isArray(doc.completed)) fail('invalid_memory_file');
+  validateMemory(doc.memory, ctx.profile);
+  return doc;
+}
+export function recordError(ctx, e, extra = {}) {
+  // Codes and numbers only: never server text, transcript text or keys.
+  const doc = { time: stamp(), code: safeCode(e) };
+  if (Number.isInteger(e?.httpStatus)) doc.httpStatus = e.httpStatus;
+  if (Array.isArray(extra.retries) && extra.retries.length) doc.retries = extra.retries.slice(-6);
+  atomic(path.join(ctx.dir, 'error.json'), doc);
+}
+function journal(ctx) {
+  const data = read(path.join(ctx.dir, 'queue.json'), { sources: {}, jobs: [] });
+  if (!data || !data.sources || !Array.isArray(data.jobs) || data.jobs.some(id => !/^[a-f0-9-]{36}$/.test(id))) fail('invalid_queue');
+  return data;
+}
+function anchor(fd, end) {
+  const buf = Buffer.alloc(Math.min(256, end));
+  fs.readSync(fd, buf, 0, buf.length, end - buf.length);
+  return hash(buf);
+}
+export function enqueue(ctx, transcript, session = 'manual') {
+  return withLock(ctx.dir, 'queue', () => {
+    noLinks(transcript);
+    const resolved = fs.realpathSync(transcript);
+    if (!/\.(?:jsonl|txt)$/i.test(resolved)) fail('transcript_must_be_jsonl_or_txt');
+    const fd = fs.openSync(resolved, 'r');
+    try {
+      const info = fs.fstatSync(fd);
+      if (!info.isFile()) fail('invalid_transcript');
+      const source = hash(resolved + '\n' + session);
+      const state = journal(ctx);
+      // A prior compaction's summary must never suppress this cycle's recall.
+      const summaryFile = path.join(ctx.dir, 'summaries', hash(session) + '.json');
+      noLinks(summaryFile); if (fs.existsSync(summaryFile)) fs.unlinkSync(summaryFile);
+      const previous = state.sources[source];
+      let start = previous?.end || 0;
+      if (info.size < start || (previous && anchor(fd, start) !== previous.anchor)) fail('transcript_rewritten');
+      const format = /\.jsonl$/i.test(resolved) ? 'jsonl' : 'text';
+      let captured = 0, jobs = 0, lastId;
+      while (start < info.size) {
+        let length = Math.min(info.size - start, 4 * 1024 * 1024);
+        let bytes = Buffer.alloc(length);
+        if (fs.readSync(fd, bytes, 0, length, start) !== length) fail('transcript_changed');
+        let complete = format === 'jsonl' ? bytes.lastIndexOf(10) + 1 : length;
+        if (format === 'jsonl' && !complete && length < info.size - start) {
+          // A single large JSONL record is bounded separately from a large log.
+          length = Math.min(info.size - start, 16 * 1024 * 1024);
+          bytes = Buffer.alloc(length);
+          if (fs.readSync(fd, bytes, 0, length, start) !== length) fail('transcript_changed');
+          complete = bytes.lastIndexOf(10) + 1;
+          if (!complete && length < info.size - start) fail('transcript_record_over_16mb');
+        }
+        if (!complete) break;
+        if (format === 'text' && complete < info.size - start) {
+          // Preserve a UTF-8 character split across a bounded text slice.
+          while (complete && (bytes[complete - 1] & 0xc0) === 0x80) complete--;
+          if (complete && (bytes[complete - 1] & 0x80)) complete--;
+        }
+        if (!complete) break;
+        const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, complete));
+        const end = start + complete;
+        const id = randomUUID();
+        mkdir(path.join(ctx.dir, 'jobs'));
+        atomic(path.join(ctx.dir, 'jobs', id + '.json'), { id, source, format, start, end, created: stamp(), raw });
+        state.jobs.push(id);
+        state.sources[source] = { end, anchor: anchor(fd, end) };
+        atomic(path.join(ctx.dir, 'queue.json'), state);
+        start = end; captured += complete; jobs++; lastId = id;
+      }
+      return { queued: jobs > 0, bytes: captured, jobs, ...(lastId ? { id: lastId } : {}) };
+    } finally { fs.closeSync(fd); }
+  });
+}
+
+function finishJob(ctx, id) {
+  withLock(ctx.dir, 'queue', () => {
+    const q = journal(ctx); q.jobs = q.jobs.filter(x => x !== id);
+    atomic(path.join(ctx.dir, 'queue.json'), q);
+    const file = path.join(ctx.dir, 'jobs', id + '.json');
+    noLinks(file); if (fs.existsSync(file)) fs.unlinkSync(file);
+  });
+}
+
+export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000, chunkTokens = 50000, maxBytes = 24576, env = process.env } = {}) {
+  return withLock(ctx.dir, 'worker', async () => {
+    let processed = 0;
+    // Retry waits (busy / rate limit, seconds) so a timeout can say why it happened.
+    const retries = [];
+    let workerKey = null;
+    const onWait = (seconds, why) => retries.push({ why, seconds, at: Math.round((Date.now() - startedAt) / 1000) });
+    const startedAt = Date.now();
+    try {
+      // Each queued segment gets its own time limit (free-tier Gemini is slow, and several
+      // segments can pile up); the worker as a whole stops after maxRunMs.
+      const runDeadline = startedAt + maxRunMs;
+      for (;;) {
+        const id = journal(ctx).jobs[0];
+        if (!id) return { processed };
+        const totalDeadline = Math.min(Date.now() + timeoutMs, runDeadline);
+        const prior = loadMemory(ctx);
+        if (prior.completed.includes(id)) { finishJob(ctx, id); continue; }
+        const job = read(path.join(ctx.dir, 'jobs', id + '.json'), null, 100 * 1024 * 1024);
+        if (!job || job.id !== id || typeof job.raw !== 'string') fail('invalid_job');
+        // Local, network-free model check first, so it is ready before recall
+        // and works even without a Gemini key. It must never block saving.
+        try { recordAudit(ctx, job, env); } catch { /* audit is best-effort */ }
+        const redactionFile = path.join(ctx.dir, 'redaction.json');
+        const redactions = read(redactionFile, {});
+        const redactionContext = redactions[job.source] || { inPrivateKey: false, tail: '' };
+        const text = redact(transcriptText(job.raw, job.format), redactionContext);
+        const remaining = totalDeadline - Date.now();
+        if (remaining <= 0) fail('timeout');
+        let personaLine = '';
+        let savedWith = ctx.model;
+        // GEMINI_API_KEY if set, else the key stored by `amk key` (read once, only if needed).
+        const key = !engine && text.trim() ? (workerKey ??= resolveKey(ctx)) : null;
+        const extract = async model => extractMemory({ text, old: prior.memory, profile: ctx.profile, date: job.created.slice(0, 10), model, lang: ctx.lang, engine: engine || geminiEngine({ key: await key, onWait }), timeoutMs: totalDeadline - Date.now(), chunkTokens, maxBytes, onPersonaLine: line => { personaLine = line; } });
+        let memory = prior.memory;
+        if (text.trim()) {
+          try { memory = await extract(ctx.model); }
+          catch (e) {
+            // The default free model is often overloaded (503) or out of free quota (429) when
+            // the other free one isn't (free quotas are per model): try it once, if there is time.
+            const alt = MODELS.find(m => m.free && m.id !== ctx.model);
+            if (!['busy', 'ratelimit'].includes(e?.kind) || !alt || totalDeadline - Date.now() < 15000) throw e;
+            retries.push({ why: 'switch_model', to: alt.id, at: Math.round((Date.now() - startedAt) / 1000) });
+            memory = await extract(alt.id); savedWith = alt.id;
+          }
+        }
+        validateMemory(memory, ctx.profile);
+        const file = path.join(ctx.dir, 'memory.json');
+        // Detect a user's pin/edit made while the model was working.
+        if (json(loadMemory(ctx)) !== json(prior)) fail('memory_changed_during_save');
+        if (fs.existsSync(file)) atomic(path.join(ctx.dir, 'backups', `${stamp().replace(/[:.]/g, '-')}-${id}.json`), prior);
+        const doc = { ...prior, savedAt: stamp(), savedWith, completed: [...prior.completed, id].slice(-1000), memory };
+        atomic(file, doc);
+        // Gemini's own line for the next compaction; written only after memory commits.
+        if (personaLine) { try { atomic(path.join(ctx.dir, 'persona.json'), { line: personaLine, time: stamp() }); } catch { /* display only */ } }
+        redactions[job.source] = redactionContext;
+        atomic(redactionFile, redactions);
+        finishJob(ctx, id); processed++;
+        atomic(path.join(ctx.dir, 'error.json'), { time: stamp(), code: null });
+      }
+    } catch (e) {
+      recordError(ctx, e, { retries });
+      // This record carries the retry list; the CLI's outer handler must not overwrite it.
+      try { if (e && typeof e === 'object') e.recorded = true; } catch { /* keep the original error */ }
+      throw e;
+    }
+  });
+}
+
+export function rememberSummary(ctx, input) {
+  if (typeof input.compact_summary !== 'string' || !input.session_id) return;
+  atomic(path.join(ctx.dir, 'summaries', hash(input.session_id) + '.json'), { text: redact(input.compact_summary), time: stamp() });
+}
+export function recall(ctx, options = {}) {
+  return recallDetails(ctx, options).text;
+}
+export function recallDetails(ctx, { summary = '', transcript, session, agent = null } = {}) {
+  const doc = loadMemory(ctx);
+  // Still saving this compaction's segment, or not saved at all yet.
+  let pending = false; try { pending = journal(ctx).jobs.length > 0; } catch { /* treat as not pending */ }
+  if (!doc.savedAt) return { text: '', gaps: 0, first: true, pending, line: '' };
+  let warning = null;
+  try {
+    if (!summary && session) summary = read(path.join(ctx.dir, 'summaries', hash(session) + '.json'), {})?.text || '';
+    if (!summary && transcript) {
+      noLinks(transcript);
+      if (fs.statSync(transcript).size > 16 * 1024 * 1024) fail('recall_transcript_over_16mb');
+      summary = latestSummary(fs.readFileSync(transcript, 'utf8'));
+    }
+  } catch { warning = 'summary_unavailable_using_last_good_memory'; summary = ''; }
+  const memory = redactObject(doc.memory);
+  let line = '';
+  try { const p = read(path.join(ctx.dir, 'persona.json'), null); line = cleanPersonaLine(p?.line, ctx.lang || 'zh'); } catch { /* fixed lines instead */ }
+  const result = gapRecall(memory, summary, ctx.lang || 'zh', agent, pending ? '' : line);
+  atomic(path.join(ctx.dir, 'recall.json'), { time: stamp(), items: doc.memory.items.length, summaryMatched: !!summary, warning });
+  return { text: result, gaps: gapItems(memory, summary).length, first: false, pending, line };
+}
+export function status(ctx) {
+  const doc = loadMemory(ctx);
+  const recalled = read(path.join(ctx.dir, 'recall.json'), null);
+  // A successful save leaves { code: null } in error.json; report that as no error.
+  const failed = read(path.join(ctx.dir, 'error.json'), null);
+  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: fs.existsSync(path.join(ctx.dir, 'worker.lock')), modelCheck: modelCheck(ctx) };
+}

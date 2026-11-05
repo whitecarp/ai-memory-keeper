@@ -1,0 +1,38 @@
+---
+name: ai-memory-keeper
+description: Turns on AI Memory Keeper's auto mode for the current project, so the person's preferences, decisions and shared moments survive context compaction in Claude Code or Codex. Use right after `amk doctor`, or when the person asks to set up AI Memory Keeper.
+---
+
+# Set up AI Memory Keeper
+
+Before each compaction, AI Memory Keeper saves the new part of the chat to a memory file on this computer, sorted by the person's own Gemini API key. After compaction it hands back what the summary missed. There's no server in between: the text goes only to Google's Gemini API.
+
+Do these steps in order, in the person's language. Ask them at most one question (step 2).
+
+**In Codex:** `amk key` and `amk enable` write outside this project. They write to `~/.ai-memory-keeper`, and `.codex/` is read-only inside the sandbox. The key check also needs the network. So run them with the person's approval to leave the sandbox.
+
+1. Run `amk doctor` from the project's root folder and read its JSON. If `node.ok` is false, install Node.js 22 or newer (`node.get` says how), then run it again. On Windows PowerShell, if `amk` is blocked by the execution policy, use `amk.cmd` instead; never change the policy.
+
+2. **The key comes first.** If `key.set` is false, run `amk key` now.
+   - On Windows it opens a small window on this computer. There they paste their Gemini API key, and can create one free through the window's link to Google AI Studio.
+   - The window checks the key with one short made-up request and tells them "OK", or the reason in plain words.
+   - Tell them, in one sentence, to paste it into that window, never into this chat.
+   - While the window is open, ask your one question: **work** profile (preferences, decisions, project conventions) or **companion** (a character's relationship and shared moments)? If they don't mind, use work.
+   - If they close the window without a key, carry on anyway. Tell them in one sentence that each compaction is still kept and queued, and is sorted once they run `amk key`.
+   - If no window appears (a sandbox can block it), ask them to run `amk key` (`amk.cmd key` in PowerShell) in their own terminal.
+   - Outside Windows, ask them to run `amk key --terminal` in their own terminal.
+   - Never ask for the key, read it, print it or put it in a command.
+
+3. Turn on auto mode for **the agent you are**. `agent.guess` in the doctor output is only a hint.
+   - Claude Code: `amk enable --agent claude --profile <work|companion>`
+   - Codex: `amk enable --agent codex --profile <work|companion>`. Then tell them, in one sentence: Codex runs these hooks only after a one-time OK. They trust this project and approve the three "AI Memory Keeper" hooks (app: **Review hooks**, or **Settings > Hooks**; CLI: `/hooks`).
+   - Any other agent: don't enable anything. Tell them auto mode works in Claude Code and Codex. Here they can save and recall by hand with `amk save --transcript FILE` and `amk recall`.
+
+   This changes only the project's own hook file (`.claude/settings.local.json` or `.codex/hooks.json`). Never edit global agent settings. The hooks find the stored key by themselves, so the agent doesn't need restarting.
+
+4. Show her: on Windows, `amk overlay --set preview`. The guardian pops up in a corner of this window, first sorting memories, then with a short line.
+
+5. Tell them, briefly:
+   - From now on, each compaction saves and brings back memories by itself.
+   - On Gemini's free tier, Google may use what's sent to improve its products, so it's not for sensitive or confidential chats.
+   - Check: `amk status`. Turn off: `amk disable --agent <claude|codex>`. The pop-up alone: `amk overlay --set off`.

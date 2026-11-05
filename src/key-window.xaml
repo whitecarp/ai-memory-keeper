@@ -1,0 +1,24 @@
+<!-- AI Memory Keeper: the window where the person pastes their Gemini API key. -->
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  Width="480" SizeToContent="Height" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Topmost="True"
+  Background="#0B1030" FontFamily="Microsoft YaHei UI, Segoe UI">
+  <Border BorderBrush="#5A4FB0" BorderThickness="0,3,0,0">
+    <StackPanel Margin="22,18,22,18">
+      <TextBlock x:Name="Head" Foreground="#FF8FD0" FontSize="16" FontWeight="Bold" Margin="0,0,0,8" TextWrapping="Wrap"/>
+      <TextBlock x:Name="Body" Foreground="#EEF0FF" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,8" LineHeight="20"/>
+      <TextBlock Margin="0,0,0,6" FontSize="13" TextWrapping="Wrap">
+        <Hyperlink x:Name="GetKey" Foreground="#CDB8FF"><Run x:Name="GetKeyText"/></Hyperlink>
+      </TextBlock>
+      <TextBlock FontSize="12" Foreground="#AEB5DE" TextWrapping="Wrap" Margin="0,0,0,12" LineHeight="18">
+        <Run x:Name="Rules"/>
+        <Hyperlink x:Name="Regions" Foreground="#CDB8FF"><Run x:Name="RegionsText"/></Hyperlink>
+      </TextBlock>
+      <PasswordBox x:Name="Key" FontSize="14" Padding="8,6" Background="#161D52" Foreground="#EEF0FF" BorderBrush="#A77BFF" CaretBrush="#EEF0FF"/>
+      <TextBlock x:Name="Note" Foreground="#FFD27A" FontSize="12.5" TextWrapping="Wrap" Margin="0,8,0,0"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+        <Button x:Name="Cancel" MinWidth="84" Padding="12,5" Margin="0,0,8,0" IsCancel="True"/>
+        <Button x:Name="Save" MinWidth="84" Padding="12,5" IsDefault="True"/>
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</Window>
