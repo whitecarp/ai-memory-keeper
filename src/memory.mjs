@@ -113,8 +113,13 @@ export function gapRecall(memory, summary = '', lang = 'zh', agent = null, line 
 }
 
 const contentText = content => typeof content === 'string' ? content : Array.isArray(content) ? content.filter(p => ['text', 'input_text', 'output_text'].includes(p?.type)).map(p => p.text || '').join('\n') : '';
-const KNOWN_TYPES = new Set(['user', 'assistant', 'system', 'progress', 'file-history-snapshot', 'queue-operation', 'last-prompt', 'session_meta', 'turn_context', 'event_msg', 'response_item', 'summary', 'compacted']);
-export function transcriptText(raw, format) {
+const KNOWN_TYPES = new Set(['user', 'assistant', 'system', 'progress', 'file-history-snapshot', 'queue-operation', 'last-prompt', 'session_meta', 'turn_context', 'event_msg', 'response_item', 'summary', 'compacted', 'token_usage_record']);
+// Codex rollout lines are {timestamp, type, payload, ...}. Codex keeps adding metadata types
+// (token_usage_record, 11-05), so in a Codex batch a line of that shape with a type this tool
+// doesn't know is still the known format, just nothing to read; otherwise one metadata-only
+// batch would block the queue. Other agents keep the strict check.
+const codexShaped = r => typeof r?.type === 'string' && r.payload !== null && typeof r.payload === 'object' && typeof r.timestamp === 'string';
+export function transcriptText(raw, format, { agent = null } = {}) {
   if (format !== 'jsonl') return raw;
   const lines = [];
   let records = 0, recognized = 0, firstShape = [];
@@ -124,7 +129,7 @@ export function transcriptText(raw, format) {
     records++;
     if (records === 1 && record && typeof record === 'object' && !Array.isArray(record)) firstShape = Object.keys(record).sort();
     if (typeof record?.type === 'string' && seenTypes.size < 8) seenTypes.add(record.type);
-    if (KNOWN_TYPES.has(record?.type)) recognized++;
+    if (KNOWN_TYPES.has(record?.type) || (agent === 'codex' && codexShaped(record))) recognized++;
     if (record.type === 'summary' || record.type === 'compacted' || record.isCompactSummary) continue;
     // Only conversation records carry the user's and the agent's words. Everything else
     // (attachments, API request logs, titles, modes, file history, our own injected

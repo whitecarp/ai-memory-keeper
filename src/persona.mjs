@@ -123,9 +123,10 @@ export function savingLines(agent, lang = 'zh') {
 }
 // The background save landed after compaction: her own line from this save (or a fixed
 // one), and when the agent gets the new memories.
-export function savedLines({ agent, lang = 'zh', line = '' }) {
+export function savedLines({ agent, lang = 'zh', line = '', nothingNew = false }) {
   const zh = lang !== 'en';
   const name = AGENT[agent] || (zh ? '你的 AI' : 'your AI');
+  if (nothingNew) return { gemini: zh ? '这次没有新的聊天内容，星星瓶里还是上次那些记忆。' : "Nothing new to keep this time; my star jar still holds last time's memories." };
   return {
     gemini: line || (zh ? '收好啦～这次的新记忆已经放进星星瓶了。' : "All sorted! This round's memories are in my star jar."),
     partner: { level: 'ok', text: zh ? `新记忆会跟着你的下一条消息交给 ${name}` : `${name} gets them with your next message` },

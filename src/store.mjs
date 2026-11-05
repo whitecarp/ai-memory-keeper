@@ -114,7 +114,7 @@ export function tailSummary(file, { maxBytes = 32 * 1024 * 1024, step = 1024 * 1
   } finally { fs.closeSync(fd); }
 }
 
-export function enqueue(ctx, transcript, session = 'manual', { firstCaptureBytes = FIRST_CAPTURE_BYTES } = {}) {
+export function enqueue(ctx, transcript, session = 'manual', { firstCaptureBytes = FIRST_CAPTURE_BYTES, agent = null } = {}) {
   return withLock(ctx.dir, 'queue', () => {
     // One transcript, one source, whichever way the agent spells its path.
     transcript = plainPath(transcript);
@@ -168,7 +168,7 @@ export function enqueue(ctx, transcript, session = 'manual', { firstCaptureBytes
         const end = start + complete;
         const id = randomUUID();
         mkdir(path.join(ctx.dir, 'jobs'));
-        atomic(path.join(ctx.dir, 'jobs', id + '.json'), { id, source, format, start, end, created: stamp(), raw });
+        atomic(path.join(ctx.dir, 'jobs', id + '.json'), { id, source, format, ...(['claude', 'codex', 'workbuddy'].includes(agent) ? { agent } : {}), start, end, created: stamp(), raw });
         state.jobs.push(id);
         state.sources[source] = { ...(state.sources[source]?.skipped ? { skipped: state.sources[source].skipped } : {}), end, anchor: anchor(fd, end) };
         atomic(path.join(ctx.dir, 'queue.json'), state);
@@ -190,7 +190,7 @@ function finishJob(ctx, id) {
 
 export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000, chunkTokens = 50000, maxBytes = 24576, env = process.env, onLanded, onFailed } = {}) {
   return withLock(ctx.dir, 'worker', async () => {
-    let processed = 0;
+    let processed = 0, withText = 0;
     // Her line from the newest segment saved in this run, for the reply after compaction.
     let lastLine = '';
     // Retry waits (busy / rate limit, seconds) so a timeout can say why it happened.
@@ -207,7 +207,7 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
       for (;;) {
         const id = journal(ctx).jobs[0];
         if (!id) {
-          if (typeof onLanded === 'function') { try { await onLanded({ processed, line: lastLine }); } catch { /* the reply is display only */ } }
+          if (typeof onLanded === 'function') { try { await onLanded({ processed, line: lastLine, nothingNew: processed > 0 && withText === 0 }); } catch { /* the reply is display only */ } }
           return { processed };
         }
         let totalDeadline = Math.min(Date.now() + timeoutMs, runDeadline);
@@ -221,7 +221,7 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         const redactionFile = path.join(ctx.dir, 'redaction.json');
         const redactions = read(redactionFile, {});
         const redactionContext = redactions[job.source] || { inPrivateKey: false, tail: '' };
-        const text = redact(transcriptText(job.raw, job.format), redactionContext);
+        const text = redact(transcriptText(job.raw, job.format, { agent: job.agent }), redactionContext);
         // A long segment (say, the first capture of a big chat) is read in several requests:
         // each gets the per-segment time, within the run's cap.
         const parts = Math.max(1, Math.ceil(estimateTokens(text) / chunkTokens));
@@ -235,6 +235,7 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         const extract = async model => extractMemory({ text, old: prior.memory, profile: ctx.profile, date: job.created.slice(0, 10), model, lang: ctx.lang, engine: engine || geminiEngine({ ...(await keys()), onWait, onVia: v => { savedVia = v; } }), onDropped: n => { dropped += n; }, timeoutMs: totalDeadline - Date.now(), chunkTokens, maxBytes, onPersonaLine: line => { personaLine = line; } });
         let memory = prior.memory;
         if (text.trim()) {
+          withText++;
           try { memory = await extract(ctx.model); }
           catch (e) {
             // The default free model is often overloaded (503) or out of free quota (429) when

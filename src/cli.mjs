@@ -130,7 +130,7 @@ export async function run(argv, dependencies = {}) {
     if (command === 'worker') {
       // When the save lands (or stops) after a compaction, she answers in the pop-up.
       const show = dependencies.showOverlay || showOverlay;
-      return await drain(ctx, { ...dependencies, onLanded: ({ line }) => saveLanded(ctx, { line, show }), onFailed: e => saveFailed(ctx, { code: safeCode(e), show }) });
+      return await drain(ctx, { ...dependencies, onLanded: ({ line, nothingNew }) => saveLanded(ctx, { line, nothingNew, show }), onFailed: e => saveFailed(ctx, { code: safeCode(e), show }) });
     }
     if (command === 'key-check') {
       // Run by the key window right after it saves: the same tiny check, in plain words.
@@ -231,7 +231,7 @@ export async function run(argv, dependencies = {}) {
         if (her) { try { await working(false); } catch { /* decoration only */ } }
         try {
           if (!input.transcript_path) fail('transcript_unavailable');
-          const captured = enqueue(ctx, input.transcript_path, input.session_id);
+          const captured = enqueue(ctx, input.transcript_path, input.session_id, { agent: options.agent });
           beginCycle(ctx, { session: input.session_id, agent: options.agent, now: cycleAt });
           if (her && captured.skippedOlderBytes > 0) { try { await working(true); } catch { /* decoration only */ } }
           // WorkBuddy has no hook after compaction: count it as finished now, so her reply pops

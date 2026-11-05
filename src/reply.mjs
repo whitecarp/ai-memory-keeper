@@ -34,7 +34,7 @@ export async function compactionFinished(ctx, { session, agent, display = true, 
 }
 
 // The worker saved everything queued. line: her line from this save, if Gemini wrote one.
-export async function saveLanded(ctx, { line = '', show = showOverlay, now = Date.now() } = {}) {
+export async function saveLanded(ctx, { line = '', nothingNew = false, show = showOverlay, now = Date.now() } = {}) {
   const c = updateCycle(ctx, c => {
     if (!c || !['compacting', 'finished', 'failed'].includes(c.phase)) return {};
     const next = { ...c, phase: 'saved', savedAt: now };
@@ -42,7 +42,8 @@ export async function saveLanded(ctx, { line = '', show = showOverlay, now = Dat
     return { next, value: next };
   });
   if (!c?.shown || !canReply(c, now) || !overlayEnabled(ctx)) return false;
-  try { await show(ctx, { lines: savedLines({ agent: c.agent, lang: ctx.lang, line: line || storedLine(ctx) }), lang: ctx.lang, cycle: c.startedAt, agentPid: 'keep' }); }
+  // Nothing new (say, a second /compact right after the first): no old line passed off as new.
+  try { await show(ctx, { lines: savedLines({ agent: c.agent, lang: ctx.lang, line: nothingNew ? '' : line || storedLine(ctx), nothingNew }), lang: ctx.lang, cycle: c.startedAt, agentPid: 'keep' }); }
   catch { return false; }
   return true;
 }
