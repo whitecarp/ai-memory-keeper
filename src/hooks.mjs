@@ -21,7 +21,9 @@ export function hookEntries(ctx, agent, owner) {
   const args = [cliPath, 'hook', '--project', ctx.project, '--home', ctx.home, '--profile', ctx.profile, '--model', ctx.model, '--lang', ctx.lang, '--agent', agent, '--owner', owner];
   if (ctx.name) args.push('--name', ctx.name);
   return events.map(event => {
-    const handler = { type: 'command', timeout: 5, statusMessage: `AI Memory Keeper ${owner}` };
+    const zh = ctx.lang !== 'en';
+    const label = { PreCompact: zh ? '保存记忆' : 'saving memories', PostCompact: zh ? '收下摘要' : 'taking the summary', SessionStart: zh ? '带回记忆' : 'bringing memories back' }[event];
+    const handler = { type: 'command', timeout: 5, statusMessage: `AI Memory Keeper · ${label}` };
     if (agent === 'claude') Object.assign(handler, { command: process.execPath, args, onFailure: 'continue' });
     else {
       const words = [process.execPath, ...args];

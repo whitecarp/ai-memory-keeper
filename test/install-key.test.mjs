@@ -130,3 +130,25 @@ test('the preview never follows the process that started it (a runner that exits
   await run(['overlay', '--set', 'preview', '--project', f.project, '--home', f.home], { previewWorkingMs: 1, showOverlay: async (ctx, o) => { calls.push(o); return true; } });
   assert.deepEqual(calls.map(c => c.agentPid), [null, null]);
 });
+test('Codex: SessionStart takes the summary from the rollout when PostCompact had none; errors say where', async t => {
+  const { enable, installationFile } = await import('../src/hooks.mjs');
+  const { read } = await import('../src/safety.mjs');
+  const f = fixture(t); enable(f.ctx, 'codex');
+  const owner = read(installationFile(f.ctx, 'codex')).owner;
+  const row = (type, payload) => JSON.stringify({ type, payload }) + '\n';
+  fs.writeFileSync(f.transcript, row('compacted', { message: 'Database: Postgres.' }));
+  const hook = input => run(['hook', '--project', f.project, '--home', f.home, '--agent', 'codex', '--owner', owner], { startWorker: async () => {}, showOverlay: async () => true, input: { session_id: 'cx2', transcript_path: f.transcript, cwd: f.project, ...input } });
+  await hook({ hook_event_name: 'SessionStart', source: 'compact' }); // no PostCompact first
+  const sums = fs.readdirSync(path.join(f.ctx.dir, 'summaries'));
+  assert.equal(sums.length, 1);
+  const hooks = JSON.parse(fs.readFileSync(path.join(f.project, '.codex', 'hooks.json'), 'utf8')).hooks;
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}/.test(hooks.SessionStart[0].hooks[0].statusMessage)); // no UUID on screen
+  assert.equal(hooks.SessionStart[0].hooks[0].statusMessage, 'AI Memory Keeper · 带回记忆');
+  const { recordError } = await import('../src/store.mjs');
+  const boom = Object.assign(new Error('x'), { code: 'EBUSY' });
+  recordError(f.ctx, boom, { event: 'PostCompact' });
+  const err = JSON.parse(fs.readFileSync(path.join(f.ctx.dir, 'error.json'), 'utf8'));
+  assert.equal(err.code, 'operation_failed'); assert.equal(err.event, 'PostCompact'); assert.equal(err.errno, 'EBUSY');
+  assert.equal(err.where, undefined); // only places in our own src/vendor code are recorded
+  assert.ok(!JSON.stringify(err).includes('x"'));
+});

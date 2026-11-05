@@ -11,7 +11,7 @@ Do these steps in order, in the person's language. Ask them at most one question
 
 **In Codex:** `amk key` and `amk enable` write outside this project. They write to `~/.ai-memory-keeper`, and `.codex/` is read-only inside the sandbox. The key check also needs the network. So run them with the person's approval to leave the sandbox.
 
-1. Run `amk doctor` from the project's root folder and read its JSON. If `node.ok` is false, install Node.js 22 or newer (`node.get` says how), then run it again. On Windows PowerShell, if `amk` is blocked by the execution policy, use `amk.cmd` instead; never change the policy.
+1. Run `amk doctor` from the project's root folder and read its JSON. If `node.ok` is false, install Node.js 22 or newer (`node.get` says how), then run it again. On Windows PowerShell, always call `npm.cmd` and `amk.cmd` (the `.ps1` versions are often blocked by the execution policy); never change the policy.
 
 2. **The key comes first.** If `key.set` is false, run `amk key` now.
    - On Windows it opens a small window on this computer. There they paste their Gemini API key, and can create one free through the window's link to Google AI Studio.
@@ -19,7 +19,7 @@ Do these steps in order, in the person's language. Ask them at most one question
    - Tell them, in one sentence, to paste it into that window, never into this chat.
    - While the window is open, ask your one question: **work** profile (preferences, decisions, project conventions) or **companion** (a character's relationship and shared moments)? If they don't mind, use work.
    - If they close the window without a key, carry on anyway. Tell them in one sentence that each compaction is still kept and queued, and is sorted once they run `amk key`.
-   - If no window appears (a sandbox can block it), ask them to run `amk key` (`amk.cmd key` in PowerShell) in their own terminal.
+   - If no window appears (a sandbox can block it), ask them to run `amk.cmd key` in their own PowerShell (`amk key` elsewhere).
    - Outside Windows, ask them to run `amk key --terminal` in their own terminal.
    - Never ask for the key, read it, print it or put it in a command.
 

@@ -6,6 +6,8 @@ import { redact } from '../src/safety.mjs';
 export const testRoot = fileURLToPath(new URL('../.test-runs/', import.meta.url));
 // Never open real Gemini-chan overlay windows from tests or the offline demo (children inherit this).
 process.env.AMK_NO_OVERLAY = '1';
+// Keep test workers in the test's environment (fake key, offline stub): no WMI start.
+process.env.AMK_NO_OUTSIDE = '1';
 export function fixture(t) {
   fs.mkdirSync(testRoot, { recursive: true });
   const dir = fs.mkdtempSync(path.join(testRoot, 'case-'));

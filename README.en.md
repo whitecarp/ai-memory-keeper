@@ -52,7 +52,16 @@ amk enable --agent claude    # run in the project's root folder; Codex: --agent 
 amk overlay --set preview    # Windows: preview the pop-up
 ```
 
-- If Windows PowerShell blocks `amk` (execution policy), use `amk.cmd` instead. There's no need to change the policy.
+In Windows PowerShell, use `npm.cmd` and `amk.cmd` (the `.ps1` versions are often blocked by the execution policy; there's no need to change it):
+
+```powershell
+npm.cmd install -g https://github.com/whitecarp/ai-memory-keeper/archive/refs/heads/main.tar.gz
+amk.cmd doctor
+amk.cmd key
+amk.cmd enable --agent codex
+amk.cmd overlay --set preview
+```
+
 - **Installing in Codex:** the install, `amk key` and `amk enable` write outside the project, and the key check needs the network, so Codex asks you to approve running them outside its sandbox. Approve them. If the key window doesn't appear, run `amk key` in your own terminal.
 - **Codex:** according to Codex's official docs, project hooks run only after you trust the project and approve the three AI Memory Keeper hooks (app: Review hooks or Settings > Hooks; CLI: `/hooks`). If the hooks change, approve them again.
 - Turn off: `amk disable --agent claude` (or codex). The pop-up alone: `amk overlay --set off`. Remove the stored key: `amk key --clear`.

@@ -13,6 +13,7 @@ import { userMessage, userLines, workingLines } from './persona.mjs';
 import { overlayEnabled, overlaySupported, setOverlay, showOverlay } from './overlay.mjs';
 import { keyStatus, resolveKey, saveKey, clearKey, openKeyWindow, promptKey, keyCheckAnswer } from './key.mjs';
 import { doctor } from './doctor.mjs';
+import { spawnOutside } from './outside.mjs';
 
 export function parse(argv) {
   const [command = 'help', ...rest] = argv; const options = {};
@@ -30,9 +31,11 @@ export function parse(argv) {
   if (options.model && !/^gemini-[a-zA-Z0-9_.-]{1,80}$/.test(options.model)) fail('invalid_model');
   return { command, options };
 }
-export function startWorker(ctx) {
+export function startWorker(ctx, { outside = false } = {}) {
   const args = [cliPath, 'worker', '--home', ctx.home, '--project', ctx.project, '--profile', ctx.profile, '--model', ctx.model, '--lang', ctx.lang];
   if (ctx.name) args.push('--name', ctx.name);
+  // Codex kills the hook's process tree when the hook returns: start it outside (outside.mjs).
+  if (outside) return spawnOutside(process.execPath, args, { cwd: ctx.project });
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, { cwd: ctx.project, detached: true, stdio: 'ignore', windowsHide: true });
     child.once('error', reject);
@@ -69,6 +72,7 @@ export async function run(argv, dependencies = {}) {
   if (command === 'help' || command === '--help') return HELP;
   const ctx = context(options);
   const start = dependencies.startWorker || startWorker;
+  let hookEvent = null;
   try {
     if (command === 'enable') return enable(ctx, options.agent);
     if (command === 'disable') return disable(ctx, options.agent);
@@ -94,9 +98,9 @@ export async function run(argv, dependencies = {}) {
         };
         const show = dependencies.showOverlay || showOverlay;
         // No agent to follow: an agent's command runner exits at once and must not close her.
-        const started = await show(ctx, { phase: 'working', lines: workingLines('claude', ctx.lang), lang: ctx.lang, agentPid: null });
+        const started = await show(ctx, { phase: 'working', lines: workingLines('claude', ctx.lang), lang: ctx.lang, agentPid: null, outside: true });
         await new Promise(resolve => setTimeout(resolve, dependencies.previewWorkingMs ?? 4000));
-        return { previewed: started && await show(ctx, { lines, lang: ctx.lang, agentPid: null }) };
+        return { previewed: started && await show(ctx, { lines, lang: ctx.lang, agentPid: null, outside: true }) };
       }
       fail('invalid_arguments');
     }
@@ -148,14 +152,15 @@ export async function run(argv, dependencies = {}) {
     }
     if (command === 'hook') {
       const input = dependencies.input || await hookInput();
+      hookEvent = typeof input?.hook_event_name === 'string' ? input.hook_event_name : null;
       authorizeHook(ctx, options.agent, options.owner, input);
       if (input.hook_event_name === 'PreCompact') {
         if (!input.transcript_path) fail('transcript_unavailable');
         enqueue(ctx, input.transcript_path, input.session_id);
-        await start(ctx);
+        await start(ctx, { outside: options.agent === 'codex' });
         // Gemini娘 appears as compaction starts and stays until SessionStart says it is done.
         if (overlayEnabled(ctx)) {
-          try { await (dependencies.showOverlay || showOverlay)(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang), lang: ctx.lang, transcript: input.transcript_path }); }
+          try { await (dependencies.showOverlay || showOverlay)(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang), lang: ctx.lang, transcript: input.transcript_path, outside: options.agent === 'codex' }); }
           catch { /* decoration only */ }
         }
         return ''; // No blocking decision, no raw text, no inherited child pipes.
@@ -172,6 +177,17 @@ export async function run(argv, dependencies = {}) {
         } else rememberSummary(ctx, input);
         return '';
       }
+      if (options.agent === 'codex' && input.transcript_path) {
+        // Codex can run SessionStart before PostCompact, or before the summary is in the
+        // rollout: read the newest summary now so recall can compare against it.
+        try {
+          noLinks(input.transcript_path);
+          if (fs.statSync(input.transcript_path).size <= 16 * 1024 * 1024) {
+            const summary = latestSummary(fs.readFileSync(input.transcript_path, 'utf8'));
+            if (summary) rememberSummary(ctx, { session_id: input.session_id, compact_summary: summary });
+          }
+        } catch { /* recall falls back to the whole memory, with a warning */ }
+      }
       const { text, gaps, first, pending, line } = recallDetails(ctx, { transcript: input.transcript_path, session: input.session_id, agent: options.agent });
       const out = text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
       const persona = { agent: options.agent, lang: ctx.lang, gaps, first, pending, line, check: modelCheck(ctx) };
@@ -180,7 +196,7 @@ export async function run(argv, dependencies = {}) {
       out.systemMessage = userMessage(persona);
       // The desktop overlay works for any agent, because it does not go through the agent's UI.
       if (overlayEnabled(ctx)) {
-        try { await (dependencies.showOverlay || showOverlay)(ctx, { lines: userLines(persona), lang: ctx.lang }); }
+        try { await (dependencies.showOverlay || showOverlay)(ctx, { lines: userLines(persona), lang: ctx.lang, outside: options.agent === 'codex' }); }
         catch { /* the overlay is decoration; never affect the hook */ }
       }
       return Object.keys(out).length ? out : '';
@@ -188,7 +204,7 @@ export async function run(argv, dependencies = {}) {
     fail('unknown_command');
   } catch (error) {
     // drain() has already written a fuller record (with retries and model switches): keep it.
-    try { if (!error?.recorded) recordError(ctx, error); } catch { /* Do not print filesystem paths or raw errors. */ }
+    try { if (!error?.recorded) recordError(ctx, error, { event: hookEvent }); } catch { /* Do not print filesystem paths or raw errors. */ }
     if (command === 'hook') return ''; // Always allow compaction, even on a bad input.
     if (command === 'worker' && safeCode(error) === 'busy') return { busy: true };
     throw error;

@@ -52,7 +52,16 @@ amk enable --agent claude    # 在项目根目录运行；Codex 用 --agent code
 amk overlay --set preview    # Windows：预览弹窗
 ```
 
-- Windows PowerShell 拦截 `amk`（执行策略）时，改用 `amk.cmd`，不需要改执行策略。
+Windows PowerShell 里请用 `npm.cmd` 和 `amk.cmd`（`.ps1` 版本常被执行策略拦下，不需要改执行策略）：
+
+```powershell
+npm.cmd install -g https://github.com/whitecarp/ai-memory-keeper/archive/refs/heads/main.tar.gz
+amk.cmd doctor
+amk.cmd key
+amk.cmd enable --agent codex
+amk.cmd overlay --set preview
+```
+
 - **在 Codex 里安装：** 安装命令、`amk key` 和 `amk enable` 会写到项目外面，key 的检查要联网，所以 Codex 会请你批准它们在沙盒外运行，批准即可。小窗口没出现时，在你自己的终端里运行 `amk key`。
 - **Codex：** 按 Codex 官方文档，项目钩子要等你信任这个项目，并批准这三个 AI Memory Keeper 钩子之后才会运行（App 用 Review hooks 或 Settings > Hooks；CLI 用 `/hooks`）。钩子内容一变就要重新批准。
 - 关掉：`amk disable --agent claude`（或 codex）。只关弹窗：`amk overlay --set off`。删掉存的 key：`amk key --clear`。

@@ -1,3 +1,4 @@
+process.env.AMK_NO_OUTSIDE = '1'; // keep the demo's worker in its offline environment
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

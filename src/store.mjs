@@ -30,11 +30,24 @@ export function loadMemory(ctx) {
   validateMemory(doc.memory, ctx.profile);
   return doc;
 }
+function workerLockState(ctx) {
+  const file = path.join(ctx.dir, 'worker.lock');
+  if (!fs.existsSync(file)) return false;
+  const pid = read(file, null)?.pid;
+  try { process.kill(pid, 0); return 'running'; } catch { return 'stale (cleared by the next save)'; }
+}
 export function recordError(ctx, e, extra = {}) {
   // Codes and numbers only: never server text, transcript text or keys.
   const doc = { time: stamp(), code: safeCode(e) };
   if (Number.isInteger(e?.httpStatus)) doc.httpStatus = e.httpStatus;
   if (Array.isArray(extra.retries) && extra.retries.length) doc.retries = extra.retries.slice(-6);
+  if (typeof extra.event === 'string' && /^[A-Za-z]{3,24}$/.test(extra.event)) doc.event = extra.event;
+  if (doc.code === 'operation_failed') {
+    // Where in our own code, and the system error code (e.g. EBUSY): never a message or data.
+    const at = String(e?.stack || '').match(/[\/](?:src|vendor)[\/]([w.-]+.m?js):(d+)/);
+    if (at) doc.where = `${at[1]}:${at[2]}`;
+    if (typeof e?.code === 'string' && /^[A-Z0-9_]{2,30}$/.test(e.code)) doc.errno = e.code;
+  }
   atomic(path.join(ctx.dir, 'error.json'), doc);
 }
 function journal(ctx) {
@@ -212,5 +225,5 @@ export function status(ctx) {
   const recalled = read(path.join(ctx.dir, 'recall.json'), null);
   // A successful save leaves { code: null } in error.json; report that as no error.
   const failed = read(path.join(ctx.dir, 'error.json'), null);
-  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: fs.existsSync(path.join(ctx.dir, 'worker.lock')), modelCheck: modelCheck(ctx) };
+  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx) };
 }

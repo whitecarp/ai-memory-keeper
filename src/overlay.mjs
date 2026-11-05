@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { read, atomic } from './safety.mjs';
 import { encodedScript, psArgs } from './powershell.mjs';
+import { spawnOutside } from './outside.mjs';
 
 // Desktop overlay: Gemini娘 floats over the agent's window after compaction.
 // On by default (Windows only). Never blocks or fails a hook: the window runs
@@ -84,7 +85,7 @@ export function overlayAlive(ctx, prev, now = Date.now()) {
 // phase "working": compaction started, she stays until "done" (or a 5-minute cap).
 // phase "done": compaction finished; the result is shown, then she fades out.
 // An open window is updated in place; otherwise a new one is started.
-export function showOverlay(ctx, { lines, lang = 'zh', phase = 'done', durationMs = 6500, agentPid = process.ppid, transcript = null, platform = process.platform, spawnImpl = spawn, env = process.env, now = Date.now } = {}) {
+export function showOverlay(ctx, { lines, lang = 'zh', phase = 'done', durationMs = 6500, agentPid = process.ppid, transcript = null, outside = false, platform = process.platform, spawnImpl = spawn, env = process.env, now = Date.now } = {}) {
   // Tests and offline demos set AMK_NO_OVERLAY=1 so they never open real windows.
   if (env.AMK_NO_OVERLAY === '1' || !overlaySupported(platform) || !lines?.gemini) return Promise.resolve(false);
   const dataFile = path.join(ctx.dir, 'overlay.json');
@@ -109,6 +110,8 @@ export function showOverlay(ctx, { lines, lang = 'zh', phase = 'done', durationM
     credit: lang === 'en' ? CREDIT.en : CREDIT.zh,
   });
   if (alive) return Promise.resolve(true);
+  // Codex ends the hook's process tree when the hook returns: start her outside it.
+  if (outside && platform === 'win32' && spawnImpl === spawn) return spawnOutside(process.execPath, [LAUNCHER, dataFile], { cwd: ctx.dir }).then(() => true);
   return new Promise((resolve, reject) => {
     // Detached Node launcher -> PowerShell (see overlay-launch.mjs for why).
     const child = spawnImpl(process.execPath, [LAUNCHER, dataFile], { detached: true, stdio: 'ignore', windowsHide: true });
