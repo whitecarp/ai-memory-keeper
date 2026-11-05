@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/hero.png" width="100%" alt="The guardian holding her star jar under the Twins constellation"></p>
+
 <h1 align="center">AI Memory Keeper</h1>
 <p align="center"><strong>Before your AI agent compacts its context, keep what matters. Afterwards, bring back what the summary missed.</strong></p>
 <p align="center">AI 记忆守护者 · Memory keeping for Claude Code and Codex, with your own Gemini API key.</p>
@@ -22,19 +24,19 @@
 
 ## One message to start
 
-Send this to your AI agent (Claude Code or Codex):
+Send this to Claude Code or Codex:
 
 ```text
 Please install https://github.com/whitecarp/ai-memory-keeper, run amk doctor, and read the skill file it points to.
 ```
 
-It installs the `amk` command. Then it opens a small window on your computer for your own Gemini API key (the key stays on your computer, never in the chat), and turns on auto mode for the current project. From then on, before each context compaction it saves the new part of the chat, and afterwards it brings back what the summary missed.
+It installs the `amk` command, opens a small window on your computer for your own Gemini API key so the key stays on your computer and never enters the chat, and turns on auto mode for the current project. From then on, before each context compaction it saves the new part of the chat, and afterwards it brings back what the summary missed.
 
 ## What it does
 
 | Keep it before compaction | Bring it back afterwards | The guardian pop-up | A check on the model |
 | :--- | :--- | :--- | :--- |
-| New chat text goes into a memory file on your computer, sorted in the background into preferences, decisions and moments by your own Gemini API key. | After compaction, the memories the summary missed go back into context, marked as history notes, not instructions. | On Windows, she appears in a corner of the agent's window while it compacts, and says what she brought back. | In Claude Code, it compares the model asked for with the one that replied, and tells you when they differ. |
+| New chat text goes into a memory file on your computer, sorted in the background into preferences, decisions and moments by your own Gemini API key. | After compaction, the memories the summary missed go back into context, marked as history notes, not instructions. | On Windows, she appears in a corner of the agent's window while it compacts, and says what she brought back. | In Claude Code, it compares the model asked for with the one that replied, warning on clear tier drops or model swaps without holding up saving. |
 
 Not a Google product. It uses the Gemini API from Google; Gemini is a trademark of Google LLC. There is no server in between: chat text goes only to Google's Gemini API.
 

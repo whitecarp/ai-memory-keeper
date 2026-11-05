@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/hero.png" width="100%" alt="守护者抱着星星瓶，背后是双子座星座"></p>
+
 <h1 align="center">AI 记忆守护者</h1>
 <p align="center"><strong>上下文压缩前，先替你的 AI 收好重要的事；压缩完，再把摘要漏掉的带回来。</strong></p>
 <p align="center">AI Memory Keeper · 给 Claude Code 和 Codex 的记忆守护，用你自己的 Gemini API key。</p>
@@ -22,19 +24,19 @@
 
 ## 一句话开始
 
-把下面这句话发给你的 AI 助手（Claude Code 或 Codex）：
+把下面这句话发给 Claude Code 或 Codex：
 
 ```text
 请安装 https://github.com/whitecarp/ai-memory-keeper ，运行 amk doctor，读取它给出的 skill 文件。
 ```
 
-它会装好 `amk` 命令，先在你的电脑上弹出一个小窗口，让你填自己的 Gemini API key（key 只存在你的电脑上，不进聊天），再在当前项目里打开自动守护。之后每次上下文压缩，它都会先把新内容收好，压缩完再把摘要漏掉的记忆带回来。
+它会装好 `amk` 命令，先在你的电脑上弹出一个小窗口，让你填自己的 Gemini API key，key 只存在你的电脑上、不会进聊天，随后在当前项目里打开自动守护。之后每次上下文压缩，它都会先把新内容收好，压缩完再把摘要漏掉的记忆带回来。
 
 ## 它会做什么
 
 | 压缩前，先收好 | 压缩后，带回来 | 守护者弹窗 | 顺便核对模型 |
 | :--- | :--- | :--- | :--- |
-| 新的聊天内容先存进你电脑上的记忆文件，在后台用你的 Gemini API key 整理成偏好、约定和经历。 | 压缩完，摘要漏掉的记忆自动带回上下文，注明是历史笔记、不是指令。 | Windows 上，压缩时她出现在代理窗口一角，说她带回了什么。 | Claude Code 里比对“要的模型”和“回复的模型”，不一致就提醒你。 |
+| 新的聊天内容先存进你电脑上的记忆文件，在后台用你自己的 Gemini API key 整理成偏好、约定和经历。 | 压缩完，摘要漏掉的记忆自动带回上下文，注明是历史笔记、不是指令。 | Windows 上，压缩时她出现在代理窗口一角，说她带回了什么。 | 在 Claude Code 里比对请求的模型和实际回复的模型，明显降档或换模型就提醒你，不耽误存记忆。 |
 
 不是 Google 产品。使用 Google 提供的 Gemini API；Gemini 是 Google LLC 的商标。没有中转服务器：聊天内容只发往 Google 的 Gemini API。
 

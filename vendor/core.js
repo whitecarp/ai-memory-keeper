@@ -538,8 +538,8 @@ export async function callGemini({ body, key, route = 'studio', signal, onWait, 
 // route 'auto': AI Studio first. When it can't answer now (busy 503, out of quota 429, Prepay
 // at $0 402) or won't take the key (403), the same key gets one try on Agent Platform;
 // onRoute('cloud') tells the caller to send the rest of the run there. If Agent Platform
-// refuses the key too, the first error stands, with cloudStatus set (the CLI does the same
-// with two separate keys).
+// refuses the key too, the first error stands, with cloudStatus and cloudMessage (Google's
+// own words) set. The CLI does the same with two separate keys.
 export async function callGeminiAuto({ route = 'auto', onRoute, ...opts }) {
   if (route !== 'auto') return callGemini({ ...opts, route });
   try {
@@ -553,6 +553,7 @@ export async function callGeminiAuto({ route = 'auto', onRoute, ...opts }) {
     } catch (e2) {
       if (!(e2 instanceof GeminiError) || !(e2.kind === 'cloudkey' || (e2.kind === 'http' && e2.httpStatus === 404))) throw e2;
       e.cloudStatus = e2.httpStatus;
+      e.cloudMessage = e2.message;
       throw e;
     }
     onRoute?.('cloud');
