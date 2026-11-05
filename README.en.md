@@ -63,7 +63,7 @@ amk.cmd overlay --set preview
 ```
 
 - **Installing in Codex:** the install, `amk key` and `amk enable` write outside the project, and the key check needs the network, so Codex asks you to approve running them outside its sandbox. Approve them. If the key window doesn't appear, run `amk key` in your own terminal.
-- **Codex:** according to Codex's official docs, project hooks run only after you trust the project and approve the three AI Memory Keeper hooks (app: Review hooks or Settings > Hooks; CLI: `/hooks`). If the hooks change, approve them again.
+- **Codex:** according to Codex's official docs, project hooks run only after you trust the project and approve the four AI Memory Keeper hooks (app: Review hooks or Settings > Hooks; CLI: `/hooks`). If the hooks change, approve them again; after an older version, running `amk enable` again upgrades it in place to four hooks.
 - Turn off: `amk disable --agent claude` (or codex). The pop-up alone: `amk overlay --set off`. Remove the stored key: `amk key --clear`.
 - `ai-memory-keeper` is the long name of the same command as `amk`.
 
@@ -75,6 +75,15 @@ amk.cmd overlay --set preview
 - Other systems: in `~/.ai-memory-keeper/gemini-key`, readable only by the current user (not encrypted).
 
 When it's saved, the key is checked with one short made-up message, and a key Google rejects isn't kept. The key never appears in the chat, command arguments, hook files or logs. An agent that's already running can't see environment variables set later; a stored key doesn't have that problem.
+
+### A second key: Google Cloud Agent Platform (optional)
+
+`amk key --cloud` stores a Google Cloud Agent Platform API key with the same small window. Create it on the Cloud console's "Agent Platform > API keys" page; an AI Studio key doesn't work on Agent Platform. Its usage is billed to the key's Cloud project, on standard Cloud billing.
+
+- By default the free AI Studio tier goes first. When it's busy (503), out of quota (429) or stopped by a $0 Prepay balance (402), that save goes to Agent Platform instead.
+- `amk route --set cloud` sends saves to Agent Platform first (Google doesn't use paid-tier prompts to improve its products); `--set auto` switches back.
+- `lastSaveVia` in `amk status` says which one saved last: `studio` or `cloud`. `amk gemini-check --cloud` checks that key on its own.
+- Per Google, the $300 Cloud free-trial credit can't pay for the Gemini API in AI Studio; whether a given credit covers Agent Platform is shown with that credit in Cloud Billing. Set a budget alert in Cloud Billing first.
 
 ## Files it changes
 
@@ -118,7 +127,7 @@ After compaction, the guardian's words appear in the agent: in Claude Code as a 
 
 ### The desktop pop-up (Windows, on by default)
 
-As compaction starts, the guardian appears in the bottom-right corner of the agent's window, sorting memories into her star jar. When it ends she shows the result, then fades after about 6 seconds (if compaction never finishes, she leaves after 5 minutes). She follows the window, clicks pass through her, and she never takes keyboard focus. She floats, blinks, moves her mouth as she talks, and crossfades between poses; with Windows' animation effects off, she's shown as still frames.
+As compaction starts, the guardian appears in the bottom-right corner of the agent's window, sorting memories into her star jar. When it ends she shows the result, then fades after about 6 seconds (if compaction never finishes, she leaves after 5 minutes). In Codex, she first says "Got it. I'm sorting it now..." and switches to her reply the moment the background save lands; after 2 minutes at most she says the new memories will reach Codex with your next message. She follows the window, clicks pass through her, and she never takes keyboard focus. She floats, blinks, moves her mouth as she talks, and crossfades between poses; with Windows' animation effects off, she's shown as still frames.
 
 ```bash
 amk overlay --set preview         # preview
@@ -137,7 +146,7 @@ The character art is not under the MIT license; see [`assets/ART-NOTICE.md`](ass
 | Agent | Auto mode | Real test |
 | --- | --- | --- |
 | Claude Code | PreCompact saves, PostCompact takes the summary, SessionStart(compact) brings memories back | Passed a real compaction |
-| Codex | The same, through the project's `.codex/hooks.json` | Waiting for a real compaction test |
+| Codex | The same, through the project's `.codex/hooks.json`; she replies in the pop-up as soon as compaction ends, and memories from a save that lands late go to Codex with the next message (UserPromptSubmit) | Passed a real compaction |
 | Others (OpenCode, DeepSeek Harness, …) | None; save and recall by hand with `amk save` / `amk recall` | — |
 
 Primary sources: [Claude Code hooks](https://code.claude.com/docs/en/hooks), [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Gemini models](https://aistudio.google.com/docs/models).

@@ -9,15 +9,17 @@ import { fail, safeCode, noLinks, redact } from './safety.mjs';
 import { extractMemory, geminiEngine } from './engine.mjs';
 import { modelCheck } from './audit.mjs';
 import { latestSummary } from './memory.mjs';
-import { userMessage, userLines, workingLines } from './persona.mjs';
+import { userMessage, userLines, workingLines, lateGreeting, lateMessage } from './persona.mjs';
 import { overlayEnabled, overlaySupported, setOverlay, showOverlay } from './overlay.mjs';
-import { keyStatus, resolveKey, saveKey, clearKey, openKeyWindow, promptKey, keyCheckAnswer } from './key.mjs';
+import { keyStatus, resolveKey, resolveCloudKey, saveKey, clearKey, openKeyWindow, promptKey, keyCheckAnswer, setRoute, routeSetting } from './key.mjs';
 import { doctor } from './doctor.mjs';
 import { spawnOutside } from './outside.mjs';
+import { beginCycle, cycleStatus } from './cycle.mjs';
+import { compactionFinished, saveLanded, saveFailed, recalled, lateDue } from './reply.mjs';
 
 export function parse(argv) {
   const [command = 'help', ...rest] = argv; const options = {};
-  const flags = new Set(['background', 'clear', 'wait', 'terminal']);
+  const flags = new Set(['background', 'clear', 'wait', 'terminal', 'cloud']);
   const values = new Set(['project', 'home', 'profile', 'name', 'agent', 'transcript', 'summary', 'model', 'lang', 'owner', 'set']);
   for (let i = 0; i < rest.length; i++) {
     if (!rest[i].startsWith('--')) fail('invalid_arguments');
@@ -51,6 +53,8 @@ const HELP = `AI Memory Keeper · amk (also: ai-memory-keeper), Node 22+
   doctor                          What's ready, and the skill file an agent should follow
   key                             Store your Gemini API key on this computer (Windows: a small window)
   key --terminal | --clear        Type it in this terminal instead (hidden), or remove it
+  key --cloud                     The same for a Google Cloud Agent Platform key (Cloud billing)
+  route --set auto|cloud          Which goes first: AI Studio (auto, default) or Agent Platform
   enable --agent claude|codex       Merge only this tool's project hooks
   disable --agent claude|codex      Remove exactly those hooks
   status                          Last save/recall/error, queued jobs, local model check
@@ -58,7 +62,7 @@ const HELP = `AI Memory Keeper · amk (also: ai-memory-keeper), Node 22+
   save --transcript FILE --background  Queue and return immediately
   recall [--summary FILE]          Local gap recall, no network
   worker                          Retry/drain existing queued snapshots
-  gemini-check                    One tiny made-up request; shows each step (needs a key)
+  gemini-check [--cloud]          One tiny made-up request; shows each step (needs a key)
   overlay --set on|off|preview|preview-alert  Desktop pop-up during compaction (Windows, on by default)
 Options: --project DIR (default: this folder) --home KEEPER_DIR --profile work|companion
          --name LABEL --model gemini-3.8-flash --lang zh|en
@@ -76,13 +80,18 @@ export async function run(argv, dependencies = {}) {
   try {
     if (command === 'enable') return enable(ctx, options.agent);
     if (command === 'disable') return disable(ctx, options.agent);
-    if (command === 'status') return { ...status(ctx), key: keyStatus(ctx), overlay: { enabled: overlayEnabled(ctx), supported: overlaySupported() }, enabled: { claude: enabled(ctx, 'claude'), codex: enabled(ctx, 'codex') } };
+    if (command === 'status') return { ...status(ctx), lastCompaction: cycleStatus(ctx), key: keyStatus(ctx), overlay: { enabled: overlayEnabled(ctx), supported: overlaySupported() }, enabled: { claude: enabled(ctx, 'claude'), codex: enabled(ctx, 'codex') } };
     if (command === 'doctor') return doctor(ctx);
+    if (command === 'route') {
+      if (options.set) return setRoute(ctx, options.set);
+      return { route: routeSetting(ctx) };
+    }
     if (command === 'key') {
-      if (options.clear) return clearKey(ctx);
-      if (process.platform === 'win32' && !options.terminal) return await (dependencies.openKeyWindow || openKeyWindow)(ctx, { wait: !!options.wait });
+      const kind = options.cloud ? 'cloud' : 'studio';
+      if (options.clear) return clearKey(ctx, process.platform, kind);
+      if (process.platform === 'win32' && !options.terminal) return await (dependencies.openKeyWindow || openKeyWindow)(ctx, { wait: !!options.wait, kind });
       const typed = await (dependencies.promptKey || promptKey)(ctx.lang === 'en' ? 'Gemini API key (hidden): ' : 'Gemini API key（输入时不显示）：');
-      return saveKey(ctx, typed);
+      return saveKey(ctx, typed, process.platform, kind);
     }
     if (command === 'overlay') {
       if (options.set === 'on' || options.set === 'off') return setOverlay(ctx, options.set === 'on');
@@ -104,33 +113,40 @@ export async function run(argv, dependencies = {}) {
       }
       fail('invalid_arguments');
     }
-    if (command === 'worker') return await drain(ctx, dependencies);
+    if (command === 'worker') {
+      // When the save lands (or stops) after a compaction, she answers in the pop-up.
+      const show = dependencies.showOverlay || showOverlay;
+      return await drain(ctx, { ...dependencies, onLanded: ({ line }) => saveLanded(ctx, { line, show }), onFailed: e => saveFailed(ctx, { code: safeCode(e), show }) });
+    }
     if (command === 'key-check') {
       // Run by the key window right after it saves: the same tiny check, in plain words.
       // A key Google rejects is removed again, so `doctor` never reports a bad key as set.
       const result = await run(['gemini-check', ...argv.slice(1)], { ...dependencies, print: () => {}, checkTimeoutMs: dependencies.checkTimeoutMs ?? 20000 });
-      const answer = keyCheckAnswer(result, ctx.lang);
-      if (!answer.keep) clearKey(ctx);
+      const kind = options.cloud ? 'cloud' : 'studio';
+      const answer = keyCheckAnswer(result, ctx.lang, kind);
+      if (!answer.keep) clearKey(ctx, process.platform, kind);
       return { ok: answer.ok, kept: answer.keep, reason: answer.reason, code: result.code ?? null };
     }
     if (command === 'gemini-check') {
       // A tiny made-up chat through the same path as a real save, narrating each step,
       // so a failure says whether it was the key, the region, a busy/rate-limited model or time.
-      const key = dependencies.engine ? null : await resolveKey(ctx);
+      // --cloud checks the Agent Platform key alone; otherwise the AI Studio key alone.
+      const key = dependencies.engine ? null : options.cloud ? await resolveCloudKey(ctx) : await resolveKey(ctx);
       if (!key && !dependencies.engine) fail('missing_gemini_key');
+      let via = null;
       const t0 = Date.now();
       const secs = () => +((Date.now() - t0) / 1000).toFixed(1);
       const say = dependencies.print || (s => process.stderr.write(s + '\n'));
       const onWait = (s, why) => say(`[${secs()}s] Gemini ${why === 'busy' ? 'is busy (503)' : 'rate limit (429)'}; waiting ${s}s, then retrying`);
-      say(`[0s] sending a tiny test request to ${ctx.model} ...`);
+      say(`[0s] sending a tiny test request to ${ctx.model}${options.cloud ? ' on Agent Platform' : ''} ...`);
       let personaLine = '';
       try {
         const memory = await extractMemory({
           text: '[2026-11-04] user: Remember: I prefer short answers. We decided to use Postgres.\n[2026-11-04] assistant: OK.',
           old: { wake_up_note: '', items: [] }, profile: 'work', date: new Date().toISOString().slice(0, 10), model: ctx.model, lang: ctx.lang,
-          engine: dependencies.engine || geminiEngine({ key, onWait }), timeoutMs: dependencies.checkTimeoutMs ?? 90000, onPersonaLine: l => { personaLine = l; },
+          engine: dependencies.engine || geminiEngine(options.cloud ? { cloudKey: key, route: 'cloud', onWait, onVia: v => { via = v; } } : { key, onWait, onVia: v => { via = v; } }), timeoutMs: dependencies.checkTimeoutMs ?? 90000, onPersonaLine: l => { personaLine = l; },
         });
-        return { ok: true, seconds: secs(), model: ctx.model, items: memory.items.length, personaLine: personaLine || null };
+        return { ok: true, seconds: secs(), model: ctx.model, via, items: memory.items.length, personaLine: personaLine || null };
       } catch (e) {
         return { ok: false, seconds: secs(), model: ctx.model, code: safeCode(e), httpStatus: e?.httpStatus ?? null, message: redact(String(e?.message || '')).slice(0, 200) };
       }
@@ -154,18 +170,32 @@ export async function run(argv, dependencies = {}) {
       const input = dependencies.input || await hookInput();
       hookEvent = typeof input?.hook_event_name === 'string' ? input.hook_event_name : null;
       authorizeHook(ctx, options.agent, options.owner, input);
+      const show = dependencies.showOverlay || showOverlay;
       if (input.hook_event_name === 'PreCompact') {
         if (!input.transcript_path) fail('transcript_unavailable');
         enqueue(ctx, input.transcript_path, input.session_id);
+        const cycle = beginCycle(ctx, { session: input.session_id, agent: options.agent });
         await start(ctx, { outside: options.agent === 'codex' });
-        // Gemini娘 appears as compaction starts and stays until SessionStart says it is done.
+        // Gemini娘 appears as compaction starts and stays until her reply.
         if (overlayEnabled(ctx)) {
-          try { await (dependencies.showOverlay || showOverlay)(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang), lang: ctx.lang, transcript: input.transcript_path, outside: options.agent === 'codex' }); }
+          try { await show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang), lang: ctx.lang, transcript: input.transcript_path, cycle, outside: options.agent === 'codex' }); }
           catch { /* decoration only */ }
         }
         return ''; // No blocking decision, no raw text, no inherited child pipes.
       }
+      if (input.hook_event_name === 'UserPromptSubmit') {
+        // A save that was still running when SessionStart handed over the memories: once
+        // it lands, the model gets it with the next message, once. Otherwise nothing at all.
+        if (!lateDue(ctx, { session: input.session_id })) return '';
+        const { text } = recallDetails(ctx, { session: input.session_id, agent: options.agent, greeting: lateGreeting(options.agent, ctx.lang) });
+        if (!text) return '';
+        return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text }, systemMessage: lateMessage(options.agent, ctx.lang) };
+      }
       if (input.hook_event_name === 'PostCompact') {
+        // Codex: she answers now, in the pop-up (SessionStart waits for the next message).
+        // Claude Code runs SessionStart right after, so only the state moves on here.
+        try { await compactionFinished(ctx, { session: input.session_id, agent: options.agent, display: options.agent === 'codex', outside: options.agent === 'codex', show }); }
+        catch { /* the reply is display only */ }
         if (options.agent === 'codex') {
           // Codex's documented payload has no compact_summary. Read only the
           // transcript supplied by this authorized session, with the recall cap.
@@ -189,14 +219,18 @@ export async function run(argv, dependencies = {}) {
         } catch { /* recall falls back to the whole memory, with a warning */ }
       }
       const { text, gaps, first, pending, line } = recallDetails(ctx, { transcript: input.transcript_path, session: input.session_id, agent: options.agent });
+      // Still saving: the model is owed this save's memories on the message after it lands.
+      let cycle = null; try { cycle = recalled(ctx, { session: input.session_id, pending }); } catch { /* no late delivery */ }
       const out = text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
       const persona = { agent: options.agent, lang: ctx.lang, gaps, first, pending, line, check: modelCheck(ctx) };
       // Both agents show a top-level systemMessage to the user (Claude Code as a status line,
       // Codex as a warning in the UI, per its hooks docs); additionalContext only reaches the model.
       out.systemMessage = userMessage(persona);
       // The desktop overlay works for any agent, because it does not go through the agent's UI.
-      if (overlayEnabled(ctx)) {
-        try { await (dependencies.showOverlay || showOverlay)(ctx, { lines: userLines(persona), lang: ctx.lang, outside: options.agent === 'codex' }); }
+      // In Codex her reply to this save already popped up after compaction: don't repeat it.
+      const replied = options.agent === 'codex' && cycle?.shown && !pending;
+      if (overlayEnabled(ctx) && !replied) {
+        try { await show(ctx, { lines: userLines(persona), lang: ctx.lang, cycle: cycle?.startedAt ?? null, outside: options.agent === 'codex' }); }
         catch { /* the overlay is decoration; never affect the hook */ }
       }
       return Object.keys(out).length ? out : '';

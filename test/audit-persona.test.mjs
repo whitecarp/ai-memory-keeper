@@ -360,15 +360,15 @@ test('each queued segment gets its own time limit, so a backlog drains instead o
     await run(['save', '--transcript', f.transcript, '--background', '--project', f.project, '--home', f.home], { startWorker: async () => {} });
   }
   assert.equal(status(f.ctx).queued, 3);
-  // Each call takes 40 ms against a 60 ms per-segment limit: 120 ms in total, which a shared
-  // 60 ms budget would not allow.
-  const slow = { complete: async () => { await new Promise(r => setTimeout(r, 40)); return memory(); } };
-  const out = await drain(f.ctx, { engine: slow, timeoutMs: 60, env: {} });
+  // Each call takes 100 ms against a 250 ms per-segment limit: 300 ms in total, which a shared
+  // 250 ms budget would not allow. (Wide margins: a busy machine adds tens of ms per call.)
+  const slow = { complete: async () => { await new Promise(r => setTimeout(r, 100)); return memory(); } };
+  const out = await drain(f.ctx, { engine: slow, timeoutMs: 250, env: {} });
   assert.equal(out.processed, 3); assert.equal(status(f.ctx).queued, 0);
   // The whole run still has a cap.
   fs.appendFileSync(f.transcript, record('Use spaces.'));
   await run(['save', '--transcript', f.transcript, '--background', '--project', f.project, '--home', f.home], { startWorker: async () => {} });
-  await assert.rejects(drain(f.ctx, { engine: slow, timeoutMs: 60, maxRunMs: 1, env: {} }), /timeout/);
+  await assert.rejects(drain(f.ctx, { engine: slow, timeoutMs: 250, maxRunMs: 1, env: {} }), /timeout/);
 });
 
 // Frames: a tiny 4x4 picture is enough to test the checks.

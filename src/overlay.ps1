@@ -33,7 +33,7 @@ try {
   }
 
   $window = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText($XamlFile, [Text.Encoding]::UTF8))
-  $state = @{ seq = $null; done = $false; lastRect = ''; closing = $false }
+  $state = @{ seq = $null; done = $false; lastRect = ''; closing = $false; phase = '' }
   [AmkFigure]::Init($window, ([Windows.SystemParameters]::ClientAreaAnimation -and $data.motion -ne $false))
 
   $fade = New-Object Windows.Threading.DispatcherTimer
@@ -42,6 +42,22 @@ try {
     $out = New-Object Windows.Media.Animation.DoubleAnimation(1, 0, [TimeSpan]::FromMilliseconds(600))
     $out.Add_Completed({ $window.Close() })
     $window.BeginAnimation([Windows.UIElement]::OpacityProperty, $out)
+  })
+  # Safety caps. Working: leave after 5 minutes if compaction never finishes. Saving (after
+  # compaction): wait for the background save at most saveCapMs, then say when the memories
+  # will arrive. The guard closes the window whatever happens.
+  $cap = New-Object Windows.Threading.DispatcherTimer; $cap.Interval = [TimeSpan]::FromMinutes(5)
+  $cap.Add_Tick({ $cap.Stop(); if (-not $state.done) { $state.done = $true; $fade.Interval = [TimeSpan]::FromMilliseconds(10); $fade.Start() } })
+  $guard = New-Object Windows.Threading.DispatcherTimer; $guard.Interval = [TimeSpan]::FromMinutes(6)
+  $guard.Add_Tick({ $guard.Stop(); $window.Close() })
+  $saveCap = New-Object Windows.Threading.DispatcherTimer
+  $saveCap.Add_Tick({
+    $saveCap.Stop()
+    if ($state.phase -ne 'saving' -or $state.closing) { return }
+    $state.done = $true
+    try { $d = & $readData; if ([string]$d.lateSay) { [AmkFigure]::Say('base', [string]$d.lateSay) } } catch {}
+    $window.FindName('PartnerBox').Visibility = 'Collapsed'
+    $fade.Stop(); $fade.Interval = [TimeSpan]::FromMilliseconds(5850); $fade.Start()
   })
 
   $apply = {
@@ -60,12 +76,22 @@ try {
       $p.Foreground = & $brush $c
       $box.Visibility = 'Visible'
     } else { $box.Visibility = 'Collapsed' }
-    if ([string]$d.phase -eq 'done' -and -not $state.done) {
-      # Compaction finished: hold the result for a moment, then fade out.
+    $ph = [string]$d.phase
+    if ($ph -eq 'saving' -and $state.phase -ne 'saving') {
+      # Compaction is over and the save is still running: wait for it, at most saveCapMs.
+      $cap.Stop()
+      $ms = [int]$d.saveCapMs; if ($ms -lt 10000 -or $ms -gt 600000) { $ms = 120000 }
+      $saveCap.Interval = [TimeSpan]::FromMilliseconds($ms); $saveCap.Start()
+      $guard.Stop(); $guard.Interval = [TimeSpan]::FromMilliseconds($ms + 60000); $guard.Start()
+    }
+    if ($ph -eq 'done' -and -not $state.closing) {
+      # The result: hold it for a moment, then fade out. A newer result restarts the hold.
+      $saveCap.Stop()
       $state.done = $true
       $hold = [int]$d.durationMs; if ($hold -lt 2000 -or $hold -gt 20000) { $hold = 6500 }
-      $fade.Interval = [TimeSpan]::FromMilliseconds($hold - 650); $fade.Start()
+      $fade.Stop(); $fade.Interval = [TimeSpan]::FromMilliseconds($hold - 650); $fade.Start()
     }
+    $state.phase = $ph
   }
   & $apply $data
 
@@ -140,7 +166,8 @@ try {
       if ($target -ne [IntPtr]::Zero -and -not [AmkNative]::IsWindow($target)) { & $closeNow; return }
       if ($agentProc -and $agentProc.HasExited) { & $closeNow; return }
     } catch {}
-    try { if (-not $state.done -and [string]$data.failSay -and (& $newHumanPrompt)) { & $failed } } catch {}
+    # Only while compacting: after it, a new prompt is just the user moving on.
+    try { if ($state.phase -eq 'working' -and -not $state.done -and [string]$data.failSay -and (& $newHumanPrompt)) { & $failed } } catch {}
     try {
       if ($target -ne [IntPtr]::Zero) {
         if ([AmkNative]::IsIconic($target)) { if ($window.Visibility -eq 'Visible') { $window.Visibility = 'Hidden' } }
@@ -153,18 +180,16 @@ try {
     } catch {}
     try { $d = & $readData; if ([string]$d.seq -ne $state.seq) { & $apply $d } } catch {}
   })
-  # Safety: never linger if the "done" signal never comes (failed compaction).
-  $cap = New-Object Windows.Threading.DispatcherTimer; $cap.Interval = [TimeSpan]::FromMinutes(5)
-  $cap.Add_Tick({ $cap.Stop(); if (-not $state.done) { $state.done = $true; $fade.Interval = [TimeSpan]::FromMilliseconds(10); $fade.Start() } })
-  $guard = New-Object Windows.Threading.DispatcherTimer; $guard.Interval = [TimeSpan]::FromMinutes(6)
-  $guard.Add_Tick({ $guard.Stop(); $window.Close() })
   $window.Add_Closed({
     $poll.Stop()
     try { [IO.File]::Delete($alive) } catch {}
     $window.Dispatcher.InvokeShutdown()
   })
 
-  $window.Show(); $poll.Start(); $cap.Start(); $guard.Start()
+  $window.Show(); $poll.Start()
+  # Never linger if the "done" signal never comes (failed compaction).
+  if ($state.phase -eq 'working') { $cap.Start() }
+  if (-not $guard.IsEnabled) { $guard.Start() }
   [Windows.Threading.Dispatcher]::Run()
 } catch {
   # Leave a local note for diagnosis (no transcript text lives in this script), then exit quietly.

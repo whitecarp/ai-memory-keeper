@@ -29,12 +29,12 @@ test('skill file: Agent Skills front matter, and it names the one Codex step tha
 });
 test('key: stored only on this computer, GEMINI_API_KEY wins, never printed by doctor or status', async t => {
   const f = fixture(t);
-  assert.deepEqual(keyStatus(f.ctx, {}), { set: false, from: null });
+  assert.deepEqual(keyStatus(f.ctx, {}), { set: false, from: null, cloud: { set: false, from: null }, route: 'auto' });
   // The non-Windows route: a file only this user can read.
   saveKey(f.ctx, FAKE, 'linux');
   assert.equal(keyStatus(f.ctx, {}, 'linux').set, true);
   assert.equal(await storedKey(f.ctx, 'linux'), FAKE);
-  assert.deepEqual(keyStatus(f.ctx, { GEMINI_API_KEY: 'from-env' }, 'linux'), { set: true, from: 'GEMINI_API_KEY' });
+  assert.deepEqual(keyStatus(f.ctx, { GEMINI_API_KEY: 'from-env' }, 'linux'), { set: true, from: 'GEMINI_API_KEY', cloud: { set: false, from: null }, route: 'auto' });
   assert.equal(await resolveKey(f.ctx, { GEMINI_API_KEY: 'from-env' }), 'from-env');
   assert.throws(() => saveKey(f.ctx, 'short', 'linux'), /invalid_key_format/);
   assert.throws(() => saveKey(f.ctx, 'has spaces in it but is long enough', 'linux'), /invalid_key_format/);

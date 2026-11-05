@@ -4,8 +4,8 @@
 # (which reads the stored key itself) tries one tiny made-up request and answers in plain
 # words; a key Google rejects is removed again. Display text comes from the UTF-8
 # $DataFile. $ResultFile gets saved, rejected or cancelled (never the key).
-# $DataFile, $XamlFile, $KeyFile, $ResultFile, $Entropy, $NodeExe, $CliFile, $KeeperHome
-# and $KeyLang are prepended by key.mjs.
+# $DataFile, $XamlFile, $KeyFile, $ResultFile, $Entropy, $NodeExe, $CliFile, $KeeperHome,
+# $KeyLang and $KeyKind (studio: AI Studio key; cloud: Agent Platform key) are prepended by key.mjs.
 $ErrorActionPreference = 'Stop'
 try {
   Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Security
@@ -19,7 +19,7 @@ try {
   $w.FindName('Rules').Text = [string]$t.rules + ' '
   $w.FindName('RegionsText').Text = [string]$t.regions
   # Only Google's own pages, fixed in key.mjs.
-  $open = { param($u) if ($u -like 'https://aistudio.google.com/*') { Start-Process $u } }
+  $open = { param($u) if ($u -like 'https://aistudio.google.com/*' -or $u -like 'https://docs.cloud.google.com/*') { Start-Process $u } }
   $w.FindName('GetKey').Add_Click({ & $open ([string]$t.keyPage) })
   $w.FindName('Regions').Add_Click({ & $open ([string]$t.regionsPage) })
   $save = $w.FindName('Save'); $cancel = $w.FindName('Cancel')
@@ -62,6 +62,7 @@ try {
     # The check reads the stored key itself: nothing secret on this command line.
     $psi = New-Object Diagnostics.ProcessStartInfo($NodeExe)
     $psi.Arguments = '"' + $CliFile + '" key-check --home "' + $KeeperHome + '" --lang ' + $KeyLang
+    if ($KeyKind -eq 'cloud') { $psi.Arguments += ' --cloud' }
     $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.CreateNoWindow = $true
     $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
     $state.started = Get-Date

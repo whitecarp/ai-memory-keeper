@@ -48,7 +48,8 @@ export function overlayFrames(assets = ASSETS) {
   }
   return frames;
 }
-export const overlayPose = (phase, level) => (phase === 'working' ? 'working' : level === 'suspect' ? 'alert' : 'base');
+// "saving": compaction is over, the background save is still running (same pose as working).
+export const overlayPose = (phase, level) => (phase === 'working' || phase === 'saving' ? 'working' : level === 'suspect' ? 'alert' : 'base');
 // The picture for a pose (the base if that pose's frame is missing).
 export function overlayArt(level, phase = 'done', frames = overlayFrames()) {
   return { art: frames[overlayPose(phase, level)] || frames.base, fit: 'contain' };
@@ -83,22 +84,30 @@ export function overlayAlive(ctx, prev, now = Date.now()) {
 }
 
 // phase "working": compaction started, she stays until "done" (or a 5-minute cap).
-// phase "done": compaction finished; the result is shown, then she fades out.
+// phase "saving": compaction finished, the save is still running; she waits for it (at most
+//   saveCapMs), then says lines.late and fades if it hasn't landed.
+// phase "done": the result is shown, then she fades out.
 // An open window is updated in place; otherwise a new one is started.
-export function showOverlay(ctx, { lines, lang = 'zh', phase = 'done', durationMs = 6500, agentPid = process.ppid, transcript = null, outside = false, platform = process.platform, spawnImpl = spawn, env = process.env, now = Date.now } = {}) {
+// cycle: the compaction this belongs to; a "saving" update never replaces that cycle's "done".
+// agentPid "keep": follow the window found for this compaction (used by the background save).
+export function showOverlay(ctx, { lines, lang = 'zh', phase = 'done', durationMs = 6500, saveCapMs = 120000, agentPid = process.ppid, transcript = null, cycle = null, outside = false, platform = process.platform, spawnImpl = spawn, env = process.env, now = Date.now } = {}) {
   // Tests and offline demos set AMK_NO_OVERLAY=1 so they never open real windows.
   if (env.AMK_NO_OVERLAY === '1' || !overlaySupported(platform) || !lines?.gemini) return Promise.resolve(false);
   const dataFile = path.join(ctx.dir, 'overlay.json');
   let prev = null; try { prev = read(dataFile, null); } catch { /* start fresh */ }
+  if (phase === 'saving' && cycle && prev?.cycle === cycle && prev?.phase === 'done') return Promise.resolve(true);
   const t = now();
   const alive = overlayAlive(ctx, prev, t);
   const frames = overlayFrames();
+  const pid = agentPid === 'keep' ? prev?.agentPid : agentPid;
   atomic(dataFile, {
     ...overlayArt(lines.partner?.level, phase, frames), pose: overlayPose(phase, lines.partner?.level), frames,
     durationMs, phase, seq: t, spawnedAt: alive ? prev?.spawnedAt || t : t,
+    cycle: cycle ?? prev?.cycle ?? null,
+    saveCapMs, lateSay: typeof lines.late === 'string' ? lines.late : null,
     // The process that started this one (the agent, or the shell for a preview): the
     // window walks up from it to find the agent's window.
-    agentPid: Number.isSafeInteger(agentPid) && agentPid > 0 ? agentPid : null,
+    agentPid: Number.isSafeInteger(pid) && pid > 0 ? pid : null,
     // While compacting: if a new typed prompt shows up in the transcript before "done",
     // compaction failed; she says so and leaves instead of waiting for the cap.
     transcript: typeof transcript === 'string' ? transcript : prev?.transcript || null,

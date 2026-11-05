@@ -7,7 +7,7 @@ import { validateMemory, transcriptText, latestSummary, gapRecall, gapItems } fr
 import { extractMemory, geminiEngine, cleanPersonaLine } from './engine.mjs';
 import { MODELS } from '../vendor/core.js';
 import { recordAudit, modelCheck } from './audit.mjs';
-import { resolveKey } from './key.mjs';
+import { resolveKey, resolveCloudKey, routeSetting } from './key.mjs';
 
 export function context(options = {}) {
   const project = fs.realpathSync(path.resolve(options.project || process.cwd()));
@@ -123,12 +123,16 @@ function finishJob(ctx, id) {
   });
 }
 
-export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000, chunkTokens = 50000, maxBytes = 24576, env = process.env } = {}) {
+export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000, chunkTokens = 50000, maxBytes = 24576, env = process.env, onLanded, onFailed } = {}) {
   return withLock(ctx.dir, 'worker', async () => {
     let processed = 0;
+    // Her line from the newest segment saved in this run, for the reply after compaction.
+    let lastLine = '';
     // Retry waits (busy / rate limit, seconds) so a timeout can say why it happened.
     const retries = [];
-    let workerKey = null;
+    // Both keys and the route setting, read once and only if a segment needs Gemini.
+    let workerKeys = null;
+    const keys = () => (workerKeys ??= Promise.all([resolveKey(ctx), resolveCloudKey(ctx)]).then(([key, cloudKey]) => ({ key, cloudKey, route: routeSetting(ctx) })));
     const onWait = (seconds, why) => retries.push({ why, seconds, at: Math.round((Date.now() - startedAt) / 1000) });
     const startedAt = Date.now();
     try {
@@ -137,7 +141,10 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
       const runDeadline = startedAt + maxRunMs;
       for (;;) {
         const id = journal(ctx).jobs[0];
-        if (!id) return { processed };
+        if (!id) {
+          if (typeof onLanded === 'function') { try { await onLanded({ processed, line: lastLine }); } catch { /* the reply is display only */ } }
+          return { processed };
+        }
         const totalDeadline = Math.min(Date.now() + timeoutMs, runDeadline);
         const prior = loadMemory(ctx);
         if (prior.completed.includes(id)) { finishJob(ctx, id); continue; }
@@ -153,10 +160,9 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         const remaining = totalDeadline - Date.now();
         if (remaining <= 0) fail('timeout');
         let personaLine = '';
-        let savedWith = ctx.model;
-        // GEMINI_API_KEY if set, else the key stored by `amk key` (read once, only if needed).
-        const key = !engine && text.trim() ? (workerKey ??= resolveKey(ctx)) : null;
-        const extract = async model => extractMemory({ text, old: prior.memory, profile: ctx.profile, date: job.created.slice(0, 10), model, lang: ctx.lang, engine: engine || geminiEngine({ key: await key, onWait }), timeoutMs: totalDeadline - Date.now(), chunkTokens, maxBytes, onPersonaLine: line => { personaLine = line; } });
+        let savedWith = ctx.model, savedVia = null;
+        // AI Studio: GEMINI_API_KEY if set, else `amk key`; Agent Platform: `amk key --cloud`.
+        const extract = async model => extractMemory({ text, old: prior.memory, profile: ctx.profile, date: job.created.slice(0, 10), model, lang: ctx.lang, engine: engine || geminiEngine({ ...(await keys()), onWait, onVia: v => { savedVia = v; } }), timeoutMs: totalDeadline - Date.now(), chunkTokens, maxBytes, onPersonaLine: line => { personaLine = line; } });
         let memory = prior.memory;
         if (text.trim()) {
           try { memory = await extract(ctx.model); }
@@ -174,10 +180,10 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         // Detect a user's pin/edit made while the model was working.
         if (json(loadMemory(ctx)) !== json(prior)) fail('memory_changed_during_save');
         if (fs.existsSync(file)) atomic(path.join(ctx.dir, 'backups', `${stamp().replace(/[:.]/g, '-')}-${id}.json`), prior);
-        const doc = { ...prior, savedAt: stamp(), savedWith, completed: [...prior.completed, id].slice(-1000), memory };
+        const doc = { ...prior, savedAt: stamp(), savedWith, ...(savedVia ? { savedVia } : {}), completed: [...prior.completed, id].slice(-1000), memory };
         atomic(file, doc);
         // Gemini's own line for the next compaction; written only after memory commits.
-        if (personaLine) { try { atomic(path.join(ctx.dir, 'persona.json'), { line: personaLine, time: stamp() }); } catch { /* display only */ } }
+        if (personaLine) { lastLine = personaLine; try { atomic(path.join(ctx.dir, 'persona.json'), { line: personaLine, time: stamp() }); } catch { /* display only */ } }
         redactions[job.source] = redactionContext;
         atomic(redactionFile, redactions);
         finishJob(ctx, id); processed++;
@@ -187,6 +193,7 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
       recordError(ctx, e, { retries });
       // This record carries the retry list; the CLI's outer handler must not overwrite it.
       try { if (e && typeof e === 'object') e.recorded = true; } catch { /* keep the original error */ }
+      if (typeof onFailed === 'function') { try { await onFailed(e); } catch { /* the reply is display only */ } }
       throw e;
     }
   });
@@ -199,7 +206,7 @@ export function rememberSummary(ctx, input) {
 export function recall(ctx, options = {}) {
   return recallDetails(ctx, options).text;
 }
-export function recallDetails(ctx, { summary = '', transcript, session, agent = null } = {}) {
+export function recallDetails(ctx, { summary = '', transcript, session, agent = null, greeting = null } = {}) {
   const doc = loadMemory(ctx);
   // Still saving this compaction's segment, or not saved at all yet.
   let pending = false; try { pending = journal(ctx).jobs.length > 0; } catch { /* treat as not pending */ }
@@ -215,8 +222,8 @@ export function recallDetails(ctx, { summary = '', transcript, session, agent = 
   } catch { warning = 'summary_unavailable_using_last_good_memory'; summary = ''; }
   const memory = redactObject(doc.memory);
   let line = '';
-  try { const p = read(path.join(ctx.dir, 'persona.json'), null); line = cleanPersonaLine(p?.line, ctx.lang || 'zh'); } catch { /* fixed lines instead */ }
-  const result = gapRecall(memory, summary, ctx.lang || 'zh', agent, pending ? '' : line);
+  try { const p = read(path.join(ctx.dir, 'persona.json'), null); line = cleanPersonaLine(p?.line, ctx.lang || 'zh', ctx.profile); } catch { /* fixed lines instead */ }
+  const result = gapRecall(memory, summary, ctx.lang || 'zh', agent, pending ? '' : line, greeting);
   atomic(path.join(ctx.dir, 'recall.json'), { time: stamp(), items: doc.memory.items.length, summaryMatched: !!summary, warning });
   return { text: result, gaps: gapItems(memory, summary).length, first: false, pending, line };
 }
@@ -225,5 +232,5 @@ export function status(ctx) {
   const recalled = read(path.join(ctx.dir, 'recall.json'), null);
   // A successful save leaves { code: null } in error.json; report that as no error.
   const failed = read(path.join(ctx.dir, 'error.json'), null);
-  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx) };
+  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx) };
 }

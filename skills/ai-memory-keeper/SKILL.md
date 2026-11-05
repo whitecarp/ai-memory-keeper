@@ -25,7 +25,7 @@ Do these steps in order, in the person's language. **Before anything else, tell 
 
 3. Turn on auto mode for **the agent you are**. `agent.guess` in the doctor output is only a hint.
    - Claude Code: `amk enable --agent claude --profile <work|companion>`
-   - Codex: `amk enable --agent codex --profile <work|companion>`. Then tell them, in one sentence: Codex runs these hooks only after a one-time OK. They trust this project and approve the three "AI Memory Keeper" hooks (app: **Review hooks**, or **Settings > Hooks**; CLI: `/hooks`).
+   - Codex: `amk enable --agent codex --profile <work|companion>`. Then tell them, in one sentence: Codex runs these hooks only after a one-time OK. They trust this project and approve the four "AI Memory Keeper" hooks (app: **Review hooks**, or **Settings > Hooks**; CLI: `/hooks`). If an older version was enabled here, `amk enable` upgrades its hooks in place, and Codex asks for that OK again.
    - Any other agent: don't enable anything. Tell them auto mode works in Claude Code and Codex. Here they can save and recall by hand with `amk save --transcript FILE` and `amk recall`.
 
    This changes only the project's own hook file (`.claude/settings.local.json` or `.codex/hooks.json`). Never edit global agent settings. The hooks find the stored key by themselves, so the agent doesn't need restarting.
@@ -36,3 +36,4 @@ Do these steps in order, in the person's language. **Before anything else, tell 
    - From now on, each compaction saves and brings back memories by itself.
    - On Gemini's free tier, Google may use what's sent to improve its products, so it's not for sensitive or confidential chats.
    - Check: `amk status`. Turn off: `amk disable --agent <claude|codex>`. The pop-up alone: `amk overlay --set off`.
+   - Only if they ask about billing or Cloud credits, or a save fails with `gemini_prepay` (HTTP 402): they can add a Google Cloud Agent Platform key with `amk key --cloud` (the same kind of window). Saves then go to it only when the free AI Studio tier is busy or used up; `amk route --set cloud` makes it go first.

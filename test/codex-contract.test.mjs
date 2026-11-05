@@ -19,16 +19,18 @@ function installed(t) {
   return f;
 }
 
-test('Codex contract: three events under hooks with documented command fields and matchers', t => {
+test('Codex contract: four events under hooks with documented command fields and matchers', t => {
   const f = installed(t);
   const config = read(path.join(f.project, '.codex', 'hooks.json'));
   assert.deepEqual(Object.keys(config), ['hooks']);
-  assert.deepEqual(Object.keys(config.hooks), ['PreCompact', 'PostCompact', 'SessionStart']);
+  assert.deepEqual(Object.keys(config.hooks), ['PreCompact', 'PostCompact', 'SessionStart', 'UserPromptSubmit']);
   for (const [event, groups] of Object.entries(config.hooks)) {
     const group = groups[0], handler = group.hooks[0];
-    assert.equal(group.matcher, event === 'SessionStart' ? '^compact$' : 'manual|auto');
+    // UserPromptSubmit takes no matcher (OpenAI's hooks page: matcher isn't used for it).
+    assert.equal(group.matcher, event === 'UserPromptSubmit' ? undefined : event === 'SessionStart' ? '^compact$' : 'manual|auto');
+    if (event === 'UserPromptSubmit') assert.deepEqual(Object.keys(group), ['hooks']);
     const fields = ['command', 'commandWindows', 'statusMessage', 'timeout', 'type'];
-    if (event === 'SessionStart') fields.push('additionalContextLimit');
+    if (event === 'SessionStart' || event === 'UserPromptSubmit') fields.push('additionalContextLimit');
     assert.deepEqual(Object.keys(handler).sort(), fields.sort());
     assert.equal(handler.type, 'command'); assert.equal(handler.timeout, 5);
     const script = Buffer.from(handler.commandWindows.split(' ').at(-1), 'base64').toString('utf16le');

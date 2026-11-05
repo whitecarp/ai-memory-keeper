@@ -1,6 +1,6 @@
 {
   "name": "ai-memory-keeper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Keeps what matters in your AI agent's chats across context compaction (Claude Code, Codex), sorted by your own Gemini API key. Not a Google product.",
   "type": "module",

@@ -8,6 +8,16 @@ export const APP_VERSION = '0.2.1';
 
 export const API_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 
+// Google Cloud's Agent Platform (Gemini Enterprise Agent Platform, formerly Vertex AI): the same
+// Gemini models, billed to the Cloud project, so Cloud credits apply. API keys work with
+// generateContent on the global endpoint, key in x-goog-api-key (checked 2026-11-05):
+//   https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/express-mode/api-reference
+//   https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference
+// AI Studio's own billing page: Cloud trial/Welcome credit can't pay for the Gemini API, and a
+// Prepay account at $0 stops every Gemini API call it pays for (HTTP 402).
+export const CLOUD_API_BASE = 'https://aiplatform.googleapis.com/v1/publishers/google/models/';
+export const cloudUrl = (model) => `${CLOUD_API_BASE}${encodeURIComponent(model)}:generateContent`;
+
 // Each of these takes 1,048,576 input tokens and returns up to 65,536.
 export const MODELS = [
   { id: 'gemini-3.8-flash', free: true },
@@ -326,7 +336,8 @@ export function buildMergeRequest({ model, sheets, final, ...opts }) {
 
 // ---------- responses ----------
 
-// Current Interactions schema is `steps`; `outputs` was the pre-June-2026 one.
+// Current Interactions schema is `steps`; `outputs` was the pre-June-2026 one. Agent Platform's
+// generateContent answers in `candidates[0].content.parts` (thought parts are skipped).
 export function textFromInteraction(resp) {
   const texts = [];
   for (const step of (resp && resp.steps) || []) {
@@ -336,7 +347,51 @@ export function textFromInteraction(resp) {
   if (!texts.length) {
     for (const o of (resp && resp.outputs) || []) if (o.type === 'text' && o.text) texts.push(o.text);
   }
+  if (!texts.length) {
+    const cand = resp && Array.isArray(resp.candidates) ? resp.candidates[0] : null;
+    for (const p of (cand && cand.content && cand.content.parts) || []) if (typeof p?.text === 'string' && p.text && !p.thought) texts.push(p.text);
+  }
   return texts.join('');
+}
+
+// ---------- Agent Platform (generateContent) ----------
+
+// The JSON schema above, in the Schema form generateContent takes: upper-case types, and
+// enums only on strings (an integer enum is dropped; the validator checks those values).
+export function cloudSchema(s) {
+  if (!s || typeof s !== 'object') return s;
+  const out = {};
+  if (s.type) out.type = String(s.type).toUpperCase();
+  if (s.description) out.description = s.description;
+  if (Array.isArray(s.enum) && s.type === 'string') out.enum = s.enum.map(String);
+  if (s.items) out.items = cloudSchema(s.items);
+  if (s.properties) out.properties = Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, cloudSchema(v)]));
+  if (Array.isArray(s.required)) out.required = s.required;
+  return out;
+}
+
+// One Interactions request (system_instruction, input, generation_config, response_format)
+// as the equivalent generateContent request.
+export function toCloudBody(body) {
+  const gc = body.generation_config || {};
+  const generationConfig = { maxOutputTokens: gc.max_output_tokens ?? 32768 };
+  if (gc.thinking_level) generationConfig.thinkingConfig = { thinkingLevel: String(gc.thinking_level).toUpperCase() };
+  const rf = body.response_format;
+  if (rf?.mime_type) generationConfig.responseMimeType = rf.mime_type;
+  if (rf?.schema) generationConfig.responseSchema = cloudSchema(rf.schema);
+  return {
+    ...(body.system_instruction ? { systemInstruction: { parts: [{ text: body.system_instruction }] } } : {}),
+    contents: [{ role: 'user', parts: [{ text: String(body.input ?? '') }] }],
+    generationConfig,
+  };
+}
+
+// Token counts in the Interactions shape, whichever API answered.
+export function usageOf(data) {
+  if (data?.usage) return data.usage;
+  const u = data?.usageMetadata;
+  if (!u) return null;
+  return { total_input_tokens: u.promptTokenCount || 0, total_output_tokens: u.candidatesTokenCount || 0, total_thought_tokens: u.thoughtsTokenCount || 0 };
 }
 
 const str = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v));
@@ -426,14 +481,17 @@ const sleep = (ms, signal) =>
 // Waits before each retry of a busy (500/503) or per-minute-limited (429) answer.
 export const BACKOFF_MS = [5000, 15000, 30000];
 
-export async function callGemini({ body, key, signal, onWait, fetchImpl = fetch, backoff = BACKOFF_MS }) {
+// route: 'studio' sends to AI Studio's Gemini API (Interactions), 'cloud' to Agent Platform
+// (generateContent, billed to the Cloud project). The body is always the Interactions form.
+export async function callGemini({ body, key, route = 'studio', signal, onWait, fetchImpl = fetch, backoff = BACKOFF_MS }) {
+  const cloud = route === 'cloud';
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetchImpl(API_URL, {
+      res = await fetchImpl(cloud ? cloudUrl(body.model) : API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify(body),
+        body: JSON.stringify(cloud ? toCloudBody(body) : body),
         signal,
         credentials: 'omit',
         cache: 'no-store',
@@ -447,16 +505,23 @@ export async function callGemini({ body, key, signal, onWait, fetchImpl = fetch,
     if (res.ok) {
       if (data?.status === 'failed') throw new GeminiError('failed', data?.error?.message, res.status);
       const text = textFromInteraction(data);
-      if (data?.status === 'incomplete') throw new GeminiError('incomplete', text.slice(-200), res.status);
+      const finish = cloud && Array.isArray(data?.candidates) ? String(data.candidates[0]?.finishReason || '') : '';
+      if (data?.status === 'incomplete' || /MAX_TOKENS/.test(finish)) throw new GeminiError('incomplete', text.slice(-200), res.status);
+      if (cloud && !text && (data?.promptFeedback?.blockReason || /SAFETY|BLOCKLIST|PROHIBITED|SPII|RECITATION/.test(finish))) throw new GeminiError('failed', finish || data.promptFeedback.blockReason, res.status);
       if (!text) throw new GeminiError('empty', JSON.stringify(data).slice(0, 300), res.status);
       try {
-        return { sheet: parseSheet(text), usage: data.usage || null };
+        return { sheet: parseSheet(text), usage: usageOf(data) };
       } catch {
         throw new GeminiError('badjson', text.slice(0, 300), res.status);
       }
     }
     const err = (Array.isArray(data) ? data[0] : data)?.error || {};
     if (REGION.test(err.message || '')) throw new GeminiError('region', err.message, res.status);
+    // Prepay billing at $0: Google stops every Gemini API call the account pays for.
+    if (res.status === 402) throw new GeminiError('prepay', err.message || res.statusText, res.status);
+    // Agent Platform takes only a key that carries an identity (one made on its API keys
+    // page) in a project with its API on; an AI Studio key gets 401 here.
+    if (cloud && (res.status === 401 || res.status === 403)) throw new GeminiError('cloudkey', err.message || res.statusText, res.status);
     const daily = /quota_exceeded|per ?day|daily/i.test(`${err.status} ${err.message}`);
     const busy = res.status === 500 || res.status === 503;
     if ((busy || (res.status === 429 && !daily)) && attempt < backoff.length) {
@@ -467,6 +532,30 @@ export async function callGemini({ body, key, signal, onWait, fetchImpl = fetch,
     }
     const kind = busy ? 'busy' : res.status === 429 ? 'ratelimit' : 'http';
     throw new GeminiError(kind, err.message || res.statusText, res.status);
+  }
+}
+
+// route 'auto': AI Studio first. A key whose project Google stops on the Gemini API (402,
+// Prepay at $0) or that isn't allowed to call it (403) gets one try on Agent Platform with
+// the same key; onRoute('cloud') tells the caller to send the rest of the run there.
+// If both refuse, the error is 'prepay' (or the first refusal) with cloudStatus set.
+export async function callGeminiAuto({ route = 'auto', onRoute, ...opts }) {
+  if (route !== 'auto') return callGemini({ ...opts, route });
+  try {
+    return await callGemini({ ...opts, route: 'studio' });
+  } catch (e) {
+    const refused = e instanceof GeminiError && (e.kind === 'prepay' || (e.kind === 'http' && e.httpStatus === 403));
+    if (!refused) throw e;
+    let out;
+    try {
+      out = await callGemini({ ...opts, route: 'cloud' });
+    } catch (e2) {
+      if (!(e2 instanceof GeminiError) || !(e2.kind === 'cloudkey' || (e2.kind === 'http' && e2.httpStatus === 404))) throw e2;
+      e.cloudStatus = e2.httpStatus;
+      throw e;
+    }
+    onRoute?.('cloud');
+    return out;
   }
 }
 

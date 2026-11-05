@@ -17,7 +17,7 @@ for (const agent of ['claude', 'codex']) {
     const original = { custom: { language: 'en' }, hooks: { Stop: [{ hooks: [] }], PreCompact: [{ matcher: 'manual', hooks: [{ type: 'command', command: 'other-hook' }] }, { matcher: 'auto', hooks: [] }] } };
     atomic(file, original);
     const result = enable(f.ctx, agent);
-    assert.equal(result.added.length, 3);
+    assert.equal(result.added.length, 4);
     assert.equal(enabled(f.ctx, agent), true);
     const first = fs.readFileSync(file);
     assert.equal(enable(f.ctx, agent).alreadyEnabled, true);

@@ -63,7 +63,7 @@ amk.cmd overlay --set preview
 ```
 
 - **在 Codex 里安装：** 安装命令、`amk key` 和 `amk enable` 会写到项目外面，key 的检查要联网，所以 Codex 会请你批准它们在沙盒外运行，批准即可。小窗口没出现时，在你自己的终端里运行 `amk key`。
-- **Codex：** 按 Codex 官方文档，项目钩子要等你信任这个项目，并批准这三个 AI Memory Keeper 钩子之后才会运行（App 用 Review hooks 或 Settings > Hooks；CLI 用 `/hooks`）。钩子内容一变就要重新批准。
+- **Codex：** 按 Codex 官方文档，项目钩子要等你信任这个项目，并批准这四个 AI Memory Keeper 钩子之后才会运行（App 用 Review hooks 或 Settings > Hooks；CLI 用 `/hooks`）。钩子内容一变就要重新批准；旧版本装过的话，再运行一次 `amk enable` 会原地升级成四个钩子。
 - 关掉：`amk disable --agent claude`（或 codex）。只关弹窗：`amk overlay --set off`。删掉存的 key：`amk key --clear`。
 - 长命令名 `ai-memory-keeper` 和 `amk` 是同一个命令。
 
@@ -75,6 +75,15 @@ amk.cmd overlay --set preview
 - 其他系统：存在 `~/.ai-memory-keeper/gemini-key`，只有当前用户能读（不加密）。
 
 保存时会用一条很短的编造消息检查这个 key，Google 不接受的 key 不会留下。key 不会出现在聊天、命令参数、钩子文件或日志里。已经在运行的代理看不到后来设置的环境变量，存在本机的 key 没有这个问题。
+
+### 第二个 key：Google Cloud Agent Platform（可选）
+
+`amk key --cloud` 会用同样的小窗口，再存一个 Google Cloud Agent Platform 的 API 密钥（在 Cloud 控制台「Agent Platform → API 密钥」页面创建；AI Studio 的 key 在 Agent Platform 用不了）。它的费用记在密钥所在的 Cloud 项目上，走标准的 Cloud 结算。
+
+- 默认先用 AI Studio 的免费额度；遇到忙（503）、额度用完（429）或预付费余额为 0（402）时，这一次保存改走 Agent Platform。
+- `amk route --set cloud` 改成先走 Agent Platform（付费层的内容不会被 Google 用来改进产品）；`--set auto` 改回来。
+- `amk status` 的 `lastSaveVia` 写着最近一次是哪个保存的：`studio` 或 `cloud`。`amk gemini-check --cloud` 单独检查这个 key。
+- 按 Google 的说明，Cloud 的 $300 免费试用赠金不能付 AI Studio 的 Gemini API 费用；Agent Platform 是否能用某笔赠金，以 Cloud 结算里的赠金说明为准。先在 Cloud 结算里设一个预算提醒。
 
 ## 会改动哪些文件
 
@@ -118,7 +127,7 @@ amk status
 
 ### 桌面弹窗（Windows，默认开启）
 
-压缩一开始，守护者就出现在代理窗口的右下角，抱着星星瓶整理记忆；压缩结束后换成结果，约 6 秒后淡出（压缩一直没结束的话，5 分钟后自动消失）。她会跟着窗口走，鼠标可以穿过她，也不抢键盘焦点。动作：轻轻浮动、眨眼、说话时嘴巴一张一合，换姿势时交叉淡入；Windows 关掉“动画效果”时只显示静止画面。
+压缩一开始，守护者就出现在代理窗口的右下角，抱着星星瓶整理记忆；压缩结束后换成结果，约 6 秒后淡出（压缩一直没结束的话，5 分钟后自动消失）。在 Codex 里，压缩一结束她先说「收好了，我在整理……」，后台保存一完成就换成她的回复；最多等 2 分钟，还没好就告诉你新记忆会跟着下一条消息交给 Codex。她会跟着窗口走，鼠标可以穿过她，也不抢键盘焦点。动作：轻轻浮动、眨眼、说话时嘴巴一张一合，换姿势时交叉淡入；Windows 关掉“动画效果”时只显示静止画面。
 
 ```bash
 amk overlay --set preview         # 预览
@@ -137,7 +146,7 @@ amk overlay --set off             # 关闭（--set on 重新打开）
 | 代理 | 自动守护 | 实测 |
 | --- | --- | --- |
 | Claude Code | PreCompact 保存，PostCompact 收摘要，SessionStart(compact) 带回记忆 | 真实压缩已测通过 |
-| Codex | 同上，通过项目的 `.codex/hooks.json` | 等待真实压缩测试 |
+| Codex | 同上，通过项目的 `.codex/hooks.json`；压缩一结束她就在弹窗里回复，后台保存晚到的记忆随下一条消息交给 Codex（UserPromptSubmit） | 真实压缩已测通过 |
 | 其他（OpenCode、DeepSeek Harness 等） | 没有；用 `amk save` / `amk recall` 手动 | — |
 
 一手资料：[Claude Code hooks](https://code.claude.com/docs/en/hooks)、[Codex hooks](https://learn.chatgpt.com/docs/hooks)、[Gemini 模型](https://aistudio.google.com/docs/models)。
