@@ -99,10 +99,13 @@ const WEAK = {
 };
 
 // Shown while compaction is still running (PreCompact), before any result exists.
-export function workingLines(agent, lang = 'zh') {
+// partial: a long chat seen for the first time; only its newest part is kept (store.mjs).
+export function workingLines(agent, lang = 'zh', { partial = false } = {}) {
   const zh = lang !== 'en';
   const name = AGENT[agent] || (zh ? '你的 AI' : 'your AI');
-  const gemini = zh ? `${name} 正在压缩上下文，我在帮你把重要的事收进星星瓶……` : `${name} is compacting. I'm tucking the important parts into my star jar...`;
+  const gemini = partial
+    ? (zh ? `${name} 正在压缩上下文。这段对话很长，我先把最近的部分收进星星瓶……` : `${name} is compacting. This chat is long, so I'm keeping its most recent part...`)
+    : (zh ? `${name} 正在压缩上下文，我在帮你把重要的事收进星星瓶……` : `${name} is compacting. I'm tucking the important parts into my star jar...`);
   // Codex gets no model check (see audit.mjs), so she doesn't say she's checking.
   if (agent === 'codex') return { gemini };
   return { gemini, partner: { level: 'pending', text: zh ? '正在核对对面是哪个模型…' : 'Checking which model is on the other side...' } };

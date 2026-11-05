@@ -82,9 +82,11 @@ test('review: unavailable/oversized summary sources still recall last good memor
   enqueue(f.ctx, f.transcript); await drain(f.ctx, { engine: engine() });
   const before = loadMemory(f.ctx);
   assert.ok(recall(f.ctx, { transcript: path.join(f.dir, 'missing.jsonl') }).includes('I prefer short answers.'));
+  assert.equal(status(f.ctx).recallWarning, 'summary_unavailable_using_last_good_memory');
+  // A big transcript is read from its end: no summary there, so the whole memory comes back.
   const big = path.join(f.dir, 'big.jsonl'); const fd = fs.openSync(big, 'w'); fs.ftruncateSync(fd, 17 * 1024 * 1024); fs.closeSync(fd);
   assert.ok(recall(f.ctx, { transcript: big }).includes('I prefer short answers.'));
-  assert.equal(status(f.ctx).recallWarning, 'summary_unavailable_using_last_good_memory');
+  assert.equal(status(f.ctx).recallWarning, null);
   assert.deepEqual(loadMemory(f.ctx), before);
 });
 test('unknown raw transcript schema is retained pending instead of discarded', async t => {

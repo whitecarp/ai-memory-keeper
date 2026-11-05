@@ -60,7 +60,53 @@ function anchor(fd, end) {
   fs.readSync(fd, buf, 0, buf.length, end - buf.length);
   return hash(buf);
 }
-export function enqueue(ctx, transcript, session = 'manual') {
+
+// A first capture of a long chat (Codex rollouts reach gigabytes) takes only its newest
+// part: copying all of it would cost gigabytes on disk and hours of free-tier requests.
+export const FIRST_CAPTURE_BYTES = 8 * 1024 * 1024;
+// The first line that starts at or after pos (text: or the next whole UTF-8 character).
+function lineStart(fd, pos, size, format) {
+  const step = 1024 * 1024;
+  for (let at = pos; at < size && at - pos < 16 * 1024 * 1024; at += step) {
+    const buf = Buffer.alloc(Math.min(step, size - at));
+    const n = fs.readSync(fd, buf, 0, buf.length, at);
+    const nl = buf.subarray(0, n).indexOf(10);
+    if (nl >= 0) return at + nl + 1;
+  }
+  if (format === 'jsonl') return size; // no record starts in the tail: capture nothing
+  const buf = Buffer.alloc(Math.min(4, size - pos));
+  fs.readSync(fd, buf, 0, buf.length, pos);
+  let skip = 0; while (skip < buf.length && (buf[skip] & 0xc0) === 0x80) skip++;
+  return pos + skip;
+}
+
+// The newest compaction summary in a transcript of any size, read backwards from the end
+// in 1 MiB steps (at most maxBytes); never the whole file.
+export function tailSummary(file, { maxBytes = 32 * 1024 * 1024, step = 1024 * 1024 } = {}) {
+  noLinks(file);
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    let end = size, carry = Buffer.alloc(0);
+    while (end > 0 && size - end < maxBytes) {
+      const start = Math.max(0, end - step);
+      const buf = Buffer.alloc(end - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      const data = Buffer.concat([buf, carry]);
+      // Lines before the first newline may begin earlier in the file: keep them for the next step.
+      const cut = start === 0 ? 0 : data.indexOf(10) + 1;
+      if (start > 0 && cut === 0) { carry = data; end = start; continue; }
+      const lines = data.subarray(cut).toString('utf8').split('\n').filter(l => l.includes('"compacted"') || l.includes('isCompactSummary'));
+      const found = lines.length ? latestSummary(lines.join('\n')) : '';
+      if (found) return found;
+      carry = data.subarray(0, cut);
+      end = start;
+    }
+    return '';
+  } finally { fs.closeSync(fd); }
+}
+
+export function enqueue(ctx, transcript, session = 'manual', { firstCaptureBytes = FIRST_CAPTURE_BYTES } = {}) {
   return withLock(ctx.dir, 'queue', () => {
     noLinks(transcript);
     const resolved = fs.realpathSync(transcript);
@@ -78,6 +124,15 @@ export function enqueue(ctx, transcript, session = 'manual') {
       let start = previous?.end || 0;
       if (info.size < start || (previous && anchor(fd, start) !== previous.anchor)) fail('transcript_rewritten');
       const format = /\.jsonl$/i.test(resolved) ? 'jsonl' : 'text';
+      let skipped = 0;
+      if (!previous && info.size > firstCaptureBytes) {
+        start = lineStart(fd, info.size - firstCaptureBytes, info.size, format);
+        skipped = start;
+        // Recorded at once, so the older part is never captured later either.
+        state.sources[source] = { end: start, anchor: anchor(fd, start), skipped };
+        atomic(path.join(ctx.dir, 'queue.json'), state);
+        atomic(path.join(ctx.dir, 'capture.json'), { time: stamp(), skippedOlderBytes: skipped, totalBytes: info.size });
+      }
       let captured = 0, jobs = 0, lastId;
       while (start < info.size) {
         let length = Math.min(info.size - start, 4 * 1024 * 1024);
@@ -105,11 +160,11 @@ export function enqueue(ctx, transcript, session = 'manual') {
         mkdir(path.join(ctx.dir, 'jobs'));
         atomic(path.join(ctx.dir, 'jobs', id + '.json'), { id, source, format, start, end, created: stamp(), raw });
         state.jobs.push(id);
-        state.sources[source] = { end, anchor: anchor(fd, end) };
+        state.sources[source] = { ...(state.sources[source]?.skipped ? { skipped: state.sources[source].skipped } : {}), end, anchor: anchor(fd, end) };
         atomic(path.join(ctx.dir, 'queue.json'), state);
         start = end; captured += complete; jobs++; lastId = id;
       }
-      return { queued: jobs > 0, bytes: captured, jobs, ...(lastId ? { id: lastId } : {}) };
+      return { queued: jobs > 0, bytes: captured, jobs, ...(lastId ? { id: lastId } : {}), ...(skipped ? { skippedOlderBytes: skipped } : {}) };
     } finally { fs.closeSync(fd); }
   });
 }
@@ -214,11 +269,7 @@ export function recallDetails(ctx, { summary = '', transcript, session, agent = 
   let warning = null;
   try {
     if (!summary && session) summary = read(path.join(ctx.dir, 'summaries', hash(session) + '.json'), {})?.text || '';
-    if (!summary && transcript) {
-      noLinks(transcript);
-      if (fs.statSync(transcript).size > 16 * 1024 * 1024) fail('recall_transcript_over_16mb');
-      summary = latestSummary(fs.readFileSync(transcript, 'utf8'));
-    }
+    if (!summary && transcript) summary = tailSummary(transcript);
   } catch { warning = 'summary_unavailable_using_last_good_memory'; summary = ''; }
   const memory = redactObject(doc.memory);
   let line = '';
@@ -232,5 +283,5 @@ export function status(ctx) {
   const recalled = read(path.join(ctx.dir, 'recall.json'), null);
   // A successful save leaves { code: null } in error.json; report that as no error.
   const failed = read(path.join(ctx.dir, 'error.json'), null);
-  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx) };
+  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx), firstCapture: read(path.join(ctx.dir, 'capture.json'), null) };
 }

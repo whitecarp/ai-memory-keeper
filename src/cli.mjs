@@ -3,12 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { context, enqueue, drain, recall, recallDetails, status, recordError, rememberSummary } from './store.mjs';
+import { context, enqueue, drain, recall, recallDetails, status, recordError, rememberSummary, tailSummary } from './store.mjs';
 import { enable, disable, enabled, authorizeHook, cliPath } from './hooks.mjs';
 import { fail, safeCode, noLinks, redact } from './safety.mjs';
 import { extractMemory, geminiEngine } from './engine.mjs';
 import { modelCheck } from './audit.mjs';
-import { latestSummary } from './memory.mjs';
 import { userMessage, userLines, workingLines, lateGreeting, lateMessage } from './persona.mjs';
 import { overlayEnabled, overlaySupported, setOverlay, showOverlay } from './overlay.mjs';
 import { keyStatus, resolveKey, resolveCloudKey, saveKey, clearKey, openKeyWindow, promptKey, keyCheckAnswer, setRoute, routeSetting } from './key.mjs';
@@ -173,12 +172,12 @@ export async function run(argv, dependencies = {}) {
       const show = dependencies.showOverlay || showOverlay;
       if (input.hook_event_name === 'PreCompact') {
         if (!input.transcript_path) fail('transcript_unavailable');
-        enqueue(ctx, input.transcript_path, input.session_id);
+        const captured = enqueue(ctx, input.transcript_path, input.session_id);
         const cycle = beginCycle(ctx, { session: input.session_id, agent: options.agent });
         await start(ctx, { outside: options.agent === 'codex' });
         // Gemini娘 appears as compaction starts and stays until her reply.
         if (overlayEnabled(ctx)) {
-          try { await show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang), lang: ctx.lang, transcript: input.transcript_path, cycle, outside: options.agent === 'codex' }); }
+          try { await show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang, { partial: captured.skippedOlderBytes > 0 }), lang: ctx.lang, transcript: input.transcript_path, cycle, outside: options.agent === 'codex' }); }
           catch { /* decoration only */ }
         }
         return ''; // No blocking decision, no raw text, no inherited child pipes.
@@ -197,12 +196,10 @@ export async function run(argv, dependencies = {}) {
         try { await compactionFinished(ctx, { session: input.session_id, agent: options.agent, display: options.agent === 'codex', outside: options.agent === 'codex', show }); }
         catch { /* the reply is display only */ }
         if (options.agent === 'codex') {
-          // Codex's documented payload has no compact_summary. Read only the
-          // transcript supplied by this authorized session, with the recall cap.
+          // Codex's documented payload has no compact_summary. Read only the transcript
+          // supplied by this authorized session, backwards from its end (rollouts get huge).
           if (!input.transcript_path) fail('transcript_unavailable');
-          noLinks(input.transcript_path);
-          if (fs.statSync(input.transcript_path).size > 16 * 1024 * 1024) fail('recall_transcript_over_16mb');
-          const summary = latestSummary(fs.readFileSync(input.transcript_path, 'utf8'));
+          const summary = tailSummary(input.transcript_path);
           if (summary) rememberSummary(ctx, { session_id: input.session_id, compact_summary: summary });
         } else rememberSummary(ctx, input);
         return '';
@@ -211,11 +208,8 @@ export async function run(argv, dependencies = {}) {
         // Codex can run SessionStart before PostCompact, or before the summary is in the
         // rollout: read the newest summary now so recall can compare against it.
         try {
-          noLinks(input.transcript_path);
-          if (fs.statSync(input.transcript_path).size <= 16 * 1024 * 1024) {
-            const summary = latestSummary(fs.readFileSync(input.transcript_path, 'utf8'));
-            if (summary) rememberSummary(ctx, { session_id: input.session_id, compact_summary: summary });
-          }
+          const summary = tailSummary(input.transcript_path);
+          if (summary) rememberSummary(ctx, { session_id: input.session_id, compact_summary: summary });
         } catch { /* recall falls back to the whole memory, with a warning */ }
       }
       const { text, gaps, first, pending, line } = recallDetails(ctx, { transcript: input.transcript_path, session: input.session_id, agent: options.agent });

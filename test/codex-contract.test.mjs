@@ -54,13 +54,15 @@ test('Codex PostCompact with no summary does not fabricate one', async t => {
   assert.ok(!fs.existsSync(path.join(f.ctx.dir, 'summaries')));
 });
 
-test('Codex PostCompact missing or oversized rollout remains nonblocking and records safe error', async t => {
+test('Codex PostCompact: a missing rollout records a safe error; a big one is read from its end', async t => {
   const f = installed(t);
   assert.equal(await run(f.args, { input: { ...f.input, transcript_path: null, hook_event_name: 'PostCompact', trigger: 'manual' } }), '');
   assert.equal(read(path.join(f.ctx.dir, 'error.json')).code, 'transcript_unavailable');
-  const fd = fs.openSync(f.transcript, 'w'); fs.ftruncateSync(fd, 16 * 1024 * 1024 + 1); fs.closeSync(fd);
+  // 40 MiB of older history (zeros: never read), then the newest summary at the end.
+  const fd = fs.openSync(f.transcript, 'w'); fs.ftruncateSync(fd, 40 * 1024 * 1024); fs.closeSync(fd);
+  fs.appendFileSync(f.transcript, '\n' + row('compacted', { message: 'Database: Postgres.' }));
   assert.equal(await run(f.args, { input: { ...f.input, hook_event_name: 'PostCompact', trigger: 'manual' } }), '');
-  assert.equal(read(path.join(f.ctx.dir, 'error.json')).code, 'recall_transcript_over_16mb');
+  assert.equal(read(path.join(f.ctx.dir, 'summaries', hash(f.input.session_id) + '.json')).text, 'Database: Postgres.');
 });
 
 test('Codex replay: rollout dialogue, summary gap and SessionStart JSON output contract', async t => {

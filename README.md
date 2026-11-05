@@ -109,7 +109,7 @@ amk status
 
 `save` 默认等保存完成，`--background` 排队后返回。失败不推进记忆文件，也不丢弃待处理原文。`recall` 不调用模型，只打印唤醒说明和摘要里没逐字出现的条目（忽略大小写、空格和标点，不声称理解同义句）。
 
-支持 UTF-8 `.txt` 和 Claude Code / Codex 的 `.jsonl`。JSONL 只取 user/assistant 正文，跳过压缩摘要、工具返回和各种元数据记录。整份文件里一种认识的记录类型都没有时，保留待处理并报错，不会把陌生格式悄悄读成空的。
+支持 UTF-8 `.txt` 和 Claude Code / Codex 的 `.jsonl`。第一次遇到很长的对话（超过 8 MiB，Codex 的 rollout 可能上 GB）时，只收最近的 8 MiB，更早的部分以后也不会再收；`status` 的 `firstCapture` 写着跳过了多少。压缩摘要从文件末尾往前找，不会读整份文件。JSONL 只取 user/assistant 正文，跳过压缩摘要、工具返回和各种元数据记录。整份文件里一种认识的记录类型都没有时，保留待处理并报错，不会把陌生格式悄悄读成空的。
 
 ### 记忆、排序与恢复
 

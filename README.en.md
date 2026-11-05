@@ -109,7 +109,7 @@ amk status
 
 `save` waits until saving is done; with `--background` it queues and returns. A failure never advances the memory file and never drops pending text. `recall` doesn't call a model: it prints the wake-up note and the items that don't appear word for word in the summary (ignoring case, spaces and punctuation; it doesn't claim to understand paraphrases).
 
-It reads UTF-8 `.txt` and Claude Code / Codex `.jsonl`. From JSONL it takes only user/assistant text, skipping compaction summaries, tool output and metadata records. If a file has no record type it recognizes at all, it stays queued with an error instead of being read as empty.
+It reads UTF-8 `.txt` and Claude Code / Codex `.jsonl`. The first time it meets a long chat (over 8 MiB; Codex rollouts can reach gigabytes), it keeps only the newest 8 MiB, and never comes back for the older part; `firstCapture` in `status` says how much was skipped. The compaction summary is found by reading backwards from the end, never the whole file. From JSONL it takes only user/assistant text, skipping compaction summaries, tool output and metadata records. If a file has no record type it recognizes at all, it stays queued with an error instead of being read as empty.
 
 ### Memory, ranking and recall
 
