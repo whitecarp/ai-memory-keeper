@@ -535,16 +535,17 @@ export async function callGemini({ body, key, route = 'studio', signal, onWait, 
   }
 }
 
-// route 'auto': AI Studio first. A key whose project Google stops on the Gemini API (402,
-// Prepay at $0) or that isn't allowed to call it (403) gets one try on Agent Platform with
-// the same key; onRoute('cloud') tells the caller to send the rest of the run there.
-// If both refuse, the error is 'prepay' (or the first refusal) with cloudStatus set.
+// route 'auto': AI Studio first. When it can't answer now (busy 503, out of quota 429, Prepay
+// at $0 402) or won't take the key (403), the same key gets one try on Agent Platform;
+// onRoute('cloud') tells the caller to send the rest of the run there. If Agent Platform
+// refuses the key too, the first error stands, with cloudStatus set (the CLI does the same
+// with two separate keys).
 export async function callGeminiAuto({ route = 'auto', onRoute, ...opts }) {
   if (route !== 'auto') return callGemini({ ...opts, route });
   try {
     return await callGemini({ ...opts, route: 'studio' });
   } catch (e) {
-    const refused = e instanceof GeminiError && (e.kind === 'prepay' || (e.kind === 'http' && e.httpStatus === 403));
+    const refused = e instanceof GeminiError && (['prepay', 'ratelimit', 'busy'].includes(e.kind) || (e.kind === 'http' && e.httpStatus === 403));
     if (!refused) throw e;
     let out;
     try {
