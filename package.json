@@ -22,6 +22,7 @@
     "assets/frames.json",
     "assets/ART-NOTICE.md",
     "README.md",
+    "README.en.md",
     "LICENSE"
   ],
   "scripts": { "test": "node --test test/*.test.mjs", "demo": "node test/demo.mjs" }
