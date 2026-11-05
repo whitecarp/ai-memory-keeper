@@ -93,9 +93,10 @@ export async function run(argv, dependencies = {}) {
           partner: { level: 'suspect', text: zh ? '回复自称来自 glm-4.6，不是 Claude（预览）' : 'replies say they came from glm-4.6, not Claude (preview)' },
         };
         const show = dependencies.showOverlay || showOverlay;
-        const started = await show(ctx, { phase: 'working', lines: workingLines('claude', ctx.lang), lang: ctx.lang });
+        // No agent to follow: an agent's command runner exits at once and must not close her.
+        const started = await show(ctx, { phase: 'working', lines: workingLines('claude', ctx.lang), lang: ctx.lang, agentPid: null });
         await new Promise(resolve => setTimeout(resolve, dependencies.previewWorkingMs ?? 4000));
-        return { previewed: started && await show(ctx, { lines, lang: ctx.lang }) };
+        return { previewed: started && await show(ctx, { lines, lang: ctx.lang, agentPid: null }) };
       }
       fail('invalid_arguments');
     }

@@ -58,7 +58,7 @@ public static class AmkNative {
     if (Process32FirstW(snap, ref e)) do { parent[e.th32ProcessID] = e.th32ParentProcessID; exe[e.th32ProcessID] = (e.szExeFile ?? "").ToLowerInvariant(); } while (Process32NextW(snap, ref e));
     CloseHandle(snap);
   }
-  static bool IsShell(string n) { return n == "cmd.exe" || n == "powershell.exe" || n == "pwsh.exe" || n == "bash.exe" || n == "sh.exe" || n == "conhost.exe"; }
+  static bool IsShell(string n) { return n == "cmd.exe" || n == "powershell.exe" || n == "pwsh.exe" || n == "bash.exe" || n == "sh.exe" || n == "conhost.exe" || n.StartsWith("codex-command-runner") || n.StartsWith("codex-windows-sandbox"); }
   // The process whose exit means the agent is gone: the first ancestor that isn't a shell
   // wrapper. A hook's powershell.exe (Codex) or npm's cmd.exe shim exits right after the
   // hook, which must not close her early. 0 when unknown (then only her window matters).

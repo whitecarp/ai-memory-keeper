@@ -114,3 +114,19 @@ test('key window: links only to Google AI Studio, with the 18+ and region line',
   const f = fixture(t);
   await run(['key', '--project', f.project, '--home', f.home], { openKeyWindow: async () => ({ window: 'opened' }) });
 });
+
+test('enable is only reported when the hook file is really on disk; status follows the file', async t => {
+  const { enable, enabled } = await import('../src/hooks.mjs');
+  const f = fixture(t);
+  const r = enable(f.ctx, 'codex');
+  assert.ok(fs.existsSync(r.config) && enabled(f.ctx, 'codex'));
+  fs.rmSync(r.config); // e.g. a sandbox that never let the file land
+  assert.equal(enabled(f.ctx, 'codex'), false);
+  assert.equal((await run(['status', '--project', f.project, '--home', f.home])).enabled.codex, false);
+  assert.equal(doctor(f.ctx, {}).enabled.codex, false);
+});
+test('the preview never follows the process that started it (a runner that exits must not close her)', async t => {
+  const f = fixture(t); const calls = [];
+  await run(['overlay', '--set', 'preview', '--project', f.project, '--home', f.home], { previewWorkingMs: 1, showOverlay: async (ctx, o) => { calls.push(o); return true; } });
+  assert.deepEqual(calls.map(c => c.agentPid), [null, null]);
+});

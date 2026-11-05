@@ -66,6 +66,12 @@ export function enable(ctx, agent) {
     atomic(installationFile(ctx, agent), { owner, enabled: true, projectId: ctx.projectId, profile: ctx.profile, file, entries });
     if (before === null ? fs.existsSync(file) : !fs.existsSync(file) || !fs.readFileSync(file).equals(before)) fail('hook_config_changed');
     atomic(file, config);
+    // A sandbox can refuse or hide the write (Codex keeps .codex read-only inside it): only
+    // report enabled once the hooks are really in the file on disk, else undo and say so.
+    if (!enabled(ctx, agent)) {
+      atomic(installationFile(ctx, agent), { owner, enabled: false, projectId: ctx.projectId, profile: ctx.profile, file, entries });
+      fail('hook_file_not_written');
+    }
     return { config: file, added: entries };
   });
 }
