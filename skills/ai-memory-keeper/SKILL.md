@@ -13,7 +13,7 @@ Do these steps in order, in the person's language. **Before anything else, tell 
 
 1. Run `amk doctor` from the project's root folder and read its JSON. If `node.ok` is false, install Node.js 22 or newer (`node.get` says how), then run it again. On Windows PowerShell, always call `npm.cmd` and `amk.cmd` (the `.ps1` versions are often blocked by the execution policy); never change the policy.
 
-2. **The key comes first.** If `key.set` is false, run `amk key` now.
+2. **The key comes first** (skip this step in Antigravity, and for WorkBuddy's `--rule` mode: those need no key). If `key.set` is false, run `amk key` now.
    - On Windows it opens a small window on this computer. There they paste their Gemini API key, and can create one free through the window's link to Google AI Studio.
    - The window checks the key with one short made-up request and tells them "OK", or the reason in plain words.
    - Tell them, in one sentence, to paste it into that window, never into this chat.
@@ -27,6 +27,8 @@ Do these steps in order, in the person's language. **Before anything else, tell 
    - Claude Code: `amk enable --agent claude --profile <work|companion>`
    - Codex: `amk enable --agent codex --profile <work|companion>`. Then tell them, in one sentence: Codex runs these hooks only after a one-time OK. They trust this project and approve the four "AI Memory Keeper" hooks (app: **Review hooks**, or **Settings > Hooks**; CLI: `/hooks`). If an older version was enabled here, `amk enable` upgrades its hooks in place, and Codex asks for that OK again.
    - WorkBuddy (preview, not yet tested in a real WorkBuddy compaction): `amk enable --agent workbuddy --profile <work|companion>`. Then tell them, in one sentence: restart WorkBuddy so it loads the project hooks; compaction there is `/summarize`, and the memories come back with the first message after it.
+   - If they'd rather not use a Gemini key in WorkBuddy, or its hooks never fire: `amk enable --agent workbuddy --rule --profile <work|companion>` instead (no-key mode, below).
+   - Antigravity: `amk enable --agent antigravity --profile <work|companion>`. Antigravity has no compaction hooks, so this is no-key mode: a rule that Antigravity loads into every chat (`.agents/rules/ai-memory-keeper.md`), telling you, the agent, to keep `.ai-memory-keeper/memory.md` yourself and read it at the start of each new chat. No key, no pop-up. Tell them, in one sentence: start a new chat for the rule to load.
    - Any other agent: don't enable anything. Tell them auto mode works in Claude Code and Codex. Here they can save and recall by hand with `amk save --transcript FILE` and `amk recall`.
 
    This changes only the project's own hook file (`.claude/settings.local.json`, `.codex/hooks.json` or `.codebuddy/settings.json`). Never edit global agent settings. The hooks find the stored key by themselves, so the agent doesn't need restarting.

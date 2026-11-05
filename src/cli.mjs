@@ -14,11 +14,12 @@ import { keyStatus, resolveKey, resolveCloudKey, saveKey, clearKey, openKeyWindo
 import { doctor } from './doctor.mjs';
 import { spawnOutside } from './outside.mjs';
 import { beginCycle, cycleStatus } from './cycle.mjs';
+import { enableRule, disableRule, ruleEnabled, ruleMemoryStatus } from './rules.mjs';
 import { compactionFinished, saveLanded, saveFailed, recalled, lateDue, awaitingRecall } from './reply.mjs';
 
 export function parse(argv) {
   const [command = 'help', ...rest] = argv; const options = {};
-  const flags = new Set(['background', 'clear', 'wait', 'terminal', 'cloud']);
+  const flags = new Set(['background', 'clear', 'wait', 'terminal', 'cloud', 'rule']);
   const values = new Set(['project', 'home', 'profile', 'name', 'agent', 'transcript', 'summary', 'model', 'lang', 'owner', 'set']);
   for (let i = 0; i < rest.length; i++) {
     if (!rest[i].startsWith('--')) fail('invalid_arguments');
@@ -56,6 +57,8 @@ const HELP = `AI Memory Keeper · amk (also: ai-memory-keeper), Node 22+
   route --set auto|cloud          Which goes first: AI Studio (auto, default) or Agent Platform
   enable --agent claude|codex|workbuddy   Merge only this tool's project hooks
   disable --agent claude|codex|workbuddy  Remove exactly those hooks
+  enable --agent antigravity            No-key mode: a rule; the agent keeps .ai-memory-keeper/memory.md
+  enable --agent workbuddy --rule       The same no-key rule for WorkBuddy (fallback)
   status                          Last save/recall/error, queued jobs, local model check
   save --transcript FILE           Save new .txt/.jsonl content using Gemini
   save --transcript FILE --background  Queue and return immediately
@@ -77,9 +80,12 @@ export async function run(argv, dependencies = {}) {
   const start = dependencies.startWorker || startWorker;
   let hookEvent = null, hookTranscript = null;
   try {
-    if (command === 'enable') return enable(ctx, options.agent);
-    if (command === 'disable') return disable(ctx, options.agent);
-    if (command === 'status') return { ...status(ctx), lastCompaction: cycleStatus(ctx), key: keyStatus(ctx), overlay: { enabled: overlayEnabled(ctx), supported: overlaySupported() }, enabled: { claude: enabled(ctx, 'claude'), codex: enabled(ctx, 'codex'), workbuddy: enabled(ctx, 'workbuddy') } };
+    // No-key mode (a rule the agent follows itself): Antigravity, which has no compaction
+    // hooks, and WorkBuddy with --rule as a fallback.
+    const ruleMode = options.agent === 'antigravity' || !!options.rule;
+    if (command === 'enable') return ruleMode ? enableRule(ctx, options.agent) : enable(ctx, options.agent);
+    if (command === 'disable') return ruleMode ? disableRule(ctx, options.agent) : disable(ctx, options.agent);
+    if (command === 'status') return { ...status(ctx), lastCompaction: cycleStatus(ctx), key: keyStatus(ctx), overlay: { enabled: overlayEnabled(ctx), supported: overlaySupported() }, enabled: { claude: enabled(ctx, 'claude'), codex: enabled(ctx, 'codex'), workbuddy: enabled(ctx, 'workbuddy') }, rules: { antigravity: ruleEnabled(ctx, 'antigravity'), workbuddy: ruleEnabled(ctx, 'workbuddy') }, ruleMemory: ruleMemoryStatus(ctx) };
     if (command === 'doctor') return doctor(ctx);
     if (command === 'route') {
       if (options.set) return setRoute(ctx, options.set);

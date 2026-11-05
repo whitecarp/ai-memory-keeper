@@ -92,7 +92,8 @@ When it's saved, the key is checked with one short made-up message, and a key Go
 - Its own data: by default `~/.ai-memory-keeper/<profile>/<project-path-hash>/`, plus its own install records.
 - Claude Code: the project's `.claude/settings.local.json`.
 - Codex: the project's `.codex/hooks.json`.
-- WorkBuddy: the project's `.codebuddy/settings.json` (never the user-level `~/.codebuddy`).
+- WorkBuddy: the project's `.codebuddy/settings.json` (never the user-level `~/.codebuddy`); in `--rule` mode, `.codebuddy/rules/ai-memory-keeper.mdc` instead.
+- Antigravity: the project's `.agents/rules/ai-memory-keeper.md` (never `~/.gemini`). In no-key mode the agent itself writes the memory file, `.ai-memory-keeper/memory.md`.
 - A lock folder both share: the project's `.ai-memory-keeper/config-locks/`.
 
 It never writes global agent settings, CLAUDE.md, AGENTS.md or an agent's own memory. `enable` merges only its own hooks; `disable` removes exactly those, by an ownership mark, without overwriting anything else. Whether to add these local files to `.gitignore` is up to you.
@@ -151,6 +152,7 @@ The character art is not under the MIT license; see [`assets/ART-NOTICE.md`](ass
 | Claude Code | PreCompact saves, PostCompact takes the summary, SessionStart(compact) brings memories back | Passed a real compaction |
 | Codex | The same, through the project's `.codex/hooks.json`; she replies in the pop-up as soon as compaction ends, and memories from a save that lands late go to Codex with the next message (UserPromptSubmit) | Passed a real compaction |
 | WorkBuddy (preview) | `amk enable --agent workbuddy`. Per Tencent's hook docs, PreCompact saves; there's no hook after compaction, so the first message after it (UserPromptSubmit) brings the memories back. Manual compaction is `/summarize`; restart WorkBuddy after enabling | Not yet tested in a real WorkBuddy compaction |
+| Antigravity (no-key mode) | `amk enable --agent antigravity`. Per Google's docs, Antigravity has no compaction hooks, so this writes a rule it loads into every chat (`trigger: always_on`): Antigravity itself keeps `.ai-memory-keeper/memory.md` and reads it at the start of each new chat. No Gemini key: it runs on your own Antigravity plan, with no pop-up. WorkBuddy can use it too: `amk enable --agent workbuddy --rule` | Not yet tested in a real Antigravity chat |
 | Others (OpenCode, DeepSeek Harness, …) | None; save and recall by hand with `amk save` / `amk recall` | — |
 
 Primary sources: [Claude Code hooks](https://code.claude.com/docs/en/hooks), [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Gemini models](https://aistudio.google.com/docs/models).
