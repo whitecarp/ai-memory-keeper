@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fail, noLinks } from './safety.mjs';
 import { encodedScript, psArgs, inlineArgs, psQuote } from './powershell.mjs';
+import { spawnOutside } from './outside.mjs';
 
 // The person's Gemini API key, kept only on this computer, so an agent that is already
 // running doesn't need GEMINI_API_KEY in its environment. GEMINI_API_KEY still wins.
@@ -174,6 +175,9 @@ export async function openKeyWindow(ctx, { wait = false, spawnImpl = spawn, time
   const { data, result } = prepareWindow(ctx);
   if (!wait) {
     await new Promise((resolve, reject) => {
+      // Outside the agent's process tree (outside.mjs), so its key check can reach Google even
+      // when the agent's sandbox has no network; tests pass their own spawnImpl.
+      if (spawnImpl === spawn) return spawnOutside(process.execPath, [LAUNCHER, data], { cwd: ctx.home }).then(resolve, reject);
       const child = spawnImpl(process.execPath, [LAUNCHER, data], { detached: true, stdio: 'ignore', windowsHide: true });
       child.once('error', reject);
       child.once('spawn', () => { child.unref(); resolve(); });

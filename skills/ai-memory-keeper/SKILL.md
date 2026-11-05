@@ -7,7 +7,7 @@ description: Turns on AI Memory Keeper's auto mode for the current project, so t
 
 Before each compaction, AI Memory Keeper saves the new part of the chat to a memory file on this computer, sorted by the person's own Gemini API key. After compaction it hands back what the summary missed. There's no server in between: the text goes only to Google's Gemini API.
 
-Do these steps in order, in the person's language. Ask them at most one question (step 2).
+Do these steps in order, in the person's language. **Before anything else, tell them in one sentence: in a moment a small window will ask for their Gemini API key, so they must never paste it into this chat.** Ask them exactly one question (step 2); don't skip it.
 
 **In Codex:** `amk key` and `amk enable` write outside this project. They write to `~/.ai-memory-keeper`, and `.codex/` is read-only inside the sandbox. The key check also needs the network. So run them with the person's approval to leave the sandbox.
 

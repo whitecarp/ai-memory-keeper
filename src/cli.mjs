@@ -108,7 +108,7 @@ export async function run(argv, dependencies = {}) {
     if (command === 'key-check') {
       // Run by the key window right after it saves: the same tiny check, in plain words.
       // A key Google rejects is removed again, so `doctor` never reports a bad key as set.
-      const result = await run(['gemini-check', ...argv.slice(1)], { ...dependencies, print: () => {} });
+      const result = await run(['gemini-check', ...argv.slice(1)], { ...dependencies, print: () => {}, checkTimeoutMs: dependencies.checkTimeoutMs ?? 20000 });
       const answer = keyCheckAnswer(result, ctx.lang);
       if (!answer.keep) clearKey(ctx);
       return { ok: answer.ok, kept: answer.keep, reason: answer.reason, code: result.code ?? null };
@@ -128,7 +128,7 @@ export async function run(argv, dependencies = {}) {
         const memory = await extractMemory({
           text: '[2026-11-04] user: Remember: I prefer short answers. We decided to use Postgres.\n[2026-11-04] assistant: OK.',
           old: { wake_up_note: '', items: [] }, profile: 'work', date: new Date().toISOString().slice(0, 10), model: ctx.model, lang: ctx.lang,
-          engine: dependencies.engine || geminiEngine({ key, onWait }), timeoutMs: 90000, onPersonaLine: l => { personaLine = l; },
+          engine: dependencies.engine || geminiEngine({ key, onWait }), timeoutMs: dependencies.checkTimeoutMs ?? 90000, onPersonaLine: l => { personaLine = l; },
         });
         return { ok: true, seconds: secs(), model: ctx.model, items: memory.items.length, personaLine: personaLine || null };
       } catch (e) {

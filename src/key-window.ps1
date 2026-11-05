@@ -33,7 +33,7 @@ try {
     $p = $state.proc
     if (-not $p) { $poll.Stop(); return }
     if (-not $p.HasExited) {
-      if (((Get-Date) - $state.started).TotalSeconds -gt 40) { $poll.Stop(); $note.Text = [string]$t.slow }
+      if (((Get-Date) - $state.started).TotalSeconds -gt 30) { $poll.Stop(); $note.Text = [string]$t.slow }
       return
     }
     $poll.Stop()
