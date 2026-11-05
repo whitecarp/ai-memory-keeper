@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { fail, hash, stamp, mkdir, read, atomic, noLinks, withLock, safeCode, json, redact, redactObject } from './safety.mjs';
 import { validateMemory, transcriptText, latestSummary, gapRecall, gapItems } from './memory.mjs';
 import { extractMemory, geminiEngine, cleanPersonaLine } from './engine.mjs';
-import { MODELS } from '../vendor/core.js';
+import { MODELS, estimateTokens } from '../vendor/core.js';
 import { recordAudit, modelCheck } from './audit.mjs';
 import { resolveKey, resolveCloudKey, routeSetting } from './key.mjs';
 
@@ -200,7 +200,7 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
           if (typeof onLanded === 'function') { try { await onLanded({ processed, line: lastLine }); } catch { /* the reply is display only */ } }
           return { processed };
         }
-        const totalDeadline = Math.min(Date.now() + timeoutMs, runDeadline);
+        let totalDeadline = Math.min(Date.now() + timeoutMs, runDeadline);
         const prior = loadMemory(ctx);
         if (prior.completed.includes(id)) { finishJob(ctx, id); continue; }
         const job = read(path.join(ctx.dir, 'jobs', id + '.json'), null, 100 * 1024 * 1024);
@@ -212,6 +212,11 @@ export async function drain(ctx, { engine, timeoutMs = 120000, maxRunMs = 600000
         const redactions = read(redactionFile, {});
         const redactionContext = redactions[job.source] || { inPrivateKey: false, tail: '' };
         const text = redact(transcriptText(job.raw, job.format), redactionContext);
+        // A long segment (say, the first capture of a big chat) is read in several requests:
+        // each gets the per-segment time, within the run's cap.
+        const parts = Math.max(1, Math.ceil(estimateTokens(text) / chunkTokens));
+        // (one more for the merge that joins their notes).
+        if (parts > 1) totalDeadline = Math.min(Date.now() + timeoutMs * (parts + 1), runDeadline);
         const remaining = totalDeadline - Date.now();
         if (remaining <= 0) fail('timeout');
         let personaLine = '';

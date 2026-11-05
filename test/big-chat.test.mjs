@@ -92,3 +92,21 @@ test('a 1 GiB Codex rollout: every hook stays fast, copies at most 8 MiB and fin
   }
   t.diagnostic(`copied ${(bytes / 1024 / 1024).toFixed(1)} MiB of ${(fs.statSync(f.transcript).size / 1024 / 1024 / 1024).toFixed(2)} GiB`);
 });
+
+test('a long segment gets the per-segment time for each of its requests, within the run cap', async t => {
+  const { drain, enqueue: queue } = await import('../src/store.mjs');
+  const { item, memory } = await import('./helpers.mjs');
+  const f = fixture(t);
+  let text = '';
+  for (let i = 0; i < 6; i++) text += said('user', `第 ${i} 条：${'塔罗'.repeat(30)}`);
+  fs.writeFileSync(f.transcript, text);
+  queue(f.ctx, f.transcript, 'long');
+  // Each request takes 40 ms; one segment's limit is 150 ms, but at 80 tokens a request the
+  // segment needs several (plus a merge), more than 150 ms in all: each gets its 150 ms.
+  let calls = 0;
+  const slow = { complete: async () => { calls++; await new Promise(r => setTimeout(r, 40)); return memory([]); } };
+  const out = await drain(f.ctx, { engine: slow, timeoutMs: 150, chunkTokens: 80, env: {} });
+  assert.equal(out.processed, 1);
+  assert.ok(calls * 40 > 150, `only ${calls} requests`);
+  assert.equal(status(f.ctx).queued, 0);
+});
