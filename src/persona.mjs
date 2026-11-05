@@ -139,6 +139,13 @@ export function failedLines(code, lang = 'zh') {
   }
   return { gemini: zh ? `这次没整理完（${code}），新内容还排着队，下次会接着整理。详情：amk status` : `Couldn't finish this time (${code}). The new part stays queued and I'll try again next time. Details: amk status` };
 }
+// PreCompact couldn't take this part of the chat (it stays in the agent's own history).
+export function captureFailedLines(code, lang = 'zh') {
+  return lang === 'en'
+    ? { gemini: `I couldn't save this time (${code}). Compaction goes on as usual; details: amk status` }
+    : { gemini: `这次没能把对话收进星星瓶（${code}）。不影响压缩，详情：amk status` };
+}
+
 // Delivered on the first message after a save that landed late (UserPromptSubmit).
 export function lateGreeting(agent, lang = 'zh') {
   const name = AGENT[agent];

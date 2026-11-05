@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { fail, hash, stamp, mkdir, read, atomic, noLinks, withLock, safeCode, json, redact, redactObject } from './safety.mjs';
+import { fail, hash, stamp, mkdir, read, atomic, noLinks, plainPath, withLock, safeCode, json, redact, redactObject } from './safety.mjs';
 import { validateMemory, transcriptText, latestSummary, gapRecall, gapItems } from './memory.mjs';
 import { extractMemory, geminiEngine, cleanPersonaLine } from './engine.mjs';
 import { MODELS, estimateTokens } from '../vendor/core.js';
@@ -48,8 +48,9 @@ export function recordError(ctx, e, extra = {}) {
   if (Array.isArray(e?.types)) doc.recordTypes = e.types.filter(k => typeof k === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]{0,23}$/.test(k)).slice(0, 8);
   if (doc.code === 'operation_failed') {
     // Where in our own code, and the system error code (e.g. EBUSY): never a message or data.
-    const at = String(e?.stack || '').match(/[\/](?:src|vendor)[\/]([w.-]+.m?js):(d+)/);
+    const at = String(e?.stack || '').match(/[\\/](?:src|vendor)[\\/]([\w.-]+\.m?js):(\d+)/);
     if (at) doc.where = `${at[1]}:${at[2]}`;
+    if (typeof e?.syscall === 'string' && /^[a-z_]{2,20}$/.test(e.syscall)) doc.syscall = e.syscall;
     if (typeof e?.code === 'string' && /^[A-Z0-9_]{2,30}$/.test(e.code)) doc.errno = e.code;
   }
   atomic(path.join(ctx.dir, 'error.json'), doc);
@@ -87,6 +88,7 @@ function lineStart(fd, pos, size, format) {
 // The newest compaction summary in a transcript of any size, read backwards from the end
 // in 1 MiB steps (at most maxBytes); never the whole file.
 export function tailSummary(file, { maxBytes = 32 * 1024 * 1024, step = 1024 * 1024 } = {}) {
+  file = plainPath(file);
   noLinks(file);
   const fd = fs.openSync(file, 'r');
   try {
@@ -112,6 +114,8 @@ export function tailSummary(file, { maxBytes = 32 * 1024 * 1024, step = 1024 * 1
 
 export function enqueue(ctx, transcript, session = 'manual', { firstCaptureBytes = FIRST_CAPTURE_BYTES } = {}) {
   return withLock(ctx.dir, 'queue', () => {
+    // One transcript, one source, whichever way the agent spells its path.
+    transcript = plainPath(transcript);
     noLinks(transcript);
     const resolved = fs.realpathSync(transcript);
     if (!/\.(?:jsonl|txt)$/i.test(resolved)) fail('transcript_must_be_jsonl_or_txt');
@@ -292,5 +296,5 @@ export function status(ctx) {
   const recalled = read(path.join(ctx.dir, 'recall.json'), null);
   // A successful save leaves { code: null } in error.json; report that as no error.
   const failed = read(path.join(ctx.dir, 'error.json'), null);
-  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx), firstCapture: read(path.join(ctx.dir, 'capture.json'), null) };
+  return { projectId: ctx.projectId, profile: ctx.profile, memoryFile: path.join(ctx.dir, 'memory.json'), lastSave: doc.savedAt, lastSaveVia: doc.savedVia || null, lastRecall: recalled?.time || null, recallWarning: recalled?.warning || null, lastError: failed?.code ? failed : null, queued: journal(ctx).jobs.length, workerLock: workerLockState(ctx), modelCheck: modelCheck(ctx), firstCapture: read(path.join(ctx.dir, 'capture.json'), null), lastHook: read(path.join(ctx.dir, 'hook.json'), null) };
 }

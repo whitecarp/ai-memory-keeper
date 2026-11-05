@@ -5,10 +5,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { context, enqueue, drain, recall, recallDetails, status, recordError, rememberSummary, tailSummary } from './store.mjs';
 import { enable, disable, enabled, authorizeHook, cliPath } from './hooks.mjs';
-import { fail, safeCode, noLinks, redact } from './safety.mjs';
+import { fail, safeCode, noLinks, redact, plainPath, atomic, stamp } from './safety.mjs';
 import { extractMemory, geminiEngine } from './engine.mjs';
 import { modelCheck } from './audit.mjs';
-import { userMessage, userLines, workingLines, lateGreeting, lateMessage } from './persona.mjs';
+import { userMessage, userLines, workingLines, lateGreeting, lateMessage, captureFailedLines } from './persona.mjs';
 import { overlayEnabled, overlaySupported, setOverlay, showOverlay } from './overlay.mjs';
 import { keyStatus, resolveKey, resolveCloudKey, saveKey, clearKey, openKeyWindow, promptKey, keyCheckAnswer, setRoute, routeSetting } from './key.mjs';
 import { doctor } from './doctor.mjs';
@@ -32,6 +32,15 @@ export function parse(argv) {
   if (options.lang && !['zh', 'en'].includes(options.lang)) fail('invalid_language');
   if (options.model && !/^gemini-[a-zA-Z0-9_.-]{1,80}$/.test(options.model)) fail('invalid_model');
   return { command, options };
+}
+// Size and dates of a transcript, for diagnosis: never its path or its text.
+function transcriptFacts(file) {
+  if (typeof file !== 'string' || !file) return { kind: 'missing' };
+  try {
+    const s = fs.statSync(file);
+    const day = d => (Number.isFinite(d?.getTime?.()) ? d.toISOString() : null);
+    return { kind: s.isFile() ? 'file' : s.isDirectory() ? 'directory' : 'other', ext: path.extname(file).toLowerCase().slice(0, 9), bytes: s.size, created: day(s.birthtime), modified: day(s.mtime) };
+  } catch (e) { return { kind: 'unreadable', errno: typeof e?.code === 'string' ? e.code.slice(0, 20) : null }; }
 }
 export function startWorker(ctx, { outside = false } = {}) {
   const args = [cliPath, 'worker', '--home', ctx.home, '--project', ctx.project, '--profile', ctx.profile, '--model', ctx.model, '--lang', ctx.lang];
@@ -172,7 +181,9 @@ export async function run(argv, dependencies = {}) {
       return recall(ctx, { summary, transcript: options.transcript });
     }
     if (command === 'hook') {
-      const input = dependencies.input || await hookInput();
+      const given = dependencies.input || await hookInput();
+      // Plain Windows paths (an agent may pass \\?\C:\…, on which Node's lstat fails at the root).
+      const input = given && typeof given === 'object' ? { ...given, ...(typeof given.transcript_path === 'string' ? { transcript_path: plainPath(given.transcript_path) } : {}), ...(typeof given.cwd === 'string' ? { cwd: plainPath(given.cwd) } : {}) } : given;
       hookEvent = typeof input?.hook_event_name === 'string' ? input.hook_event_name : null;
       hookTranscript = typeof input?.transcript_path === 'string' ? input.transcript_path : null;
       authorizeHook(ctx, options.agent, options.owner, input);
@@ -209,17 +220,27 @@ export async function run(argv, dependencies = {}) {
         return Object.keys(out).length ? out : '';
       };
       if (input.hook_event_name === 'PreCompact') {
-        if (!input.transcript_path) fail('transcript_unavailable');
-        const captured = enqueue(ctx, input.transcript_path, input.session_id);
-        const cycle = beginCycle(ctx, { session: input.session_id, agent: options.agent });
-        // WorkBuddy has no hook after compaction: count it as finished now, so her reply pops
-        // up as soon as the save lands.
-        if (options.agent === 'workbuddy') { try { await compactionFinished(ctx, { session: input.session_id, agent: options.agent, display: false }); } catch { /* display only */ } }
-        await start(ctx, { outside });
-        // Gemini娘 appears as compaction starts and stays until her reply.
-        if (overlayEnabled(ctx)) {
-          try { await show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang, { partial: captured.skippedOlderBytes > 0 }), lang: ctx.lang, transcript: options.agent === 'workbuddy' ? null : input.transcript_path, cycle, outside }); }
-          catch { /* decoration only */ }
+        // What the agent handed over, as metadata only (size and dates, never a path or text):
+        // it tells an old chat from a new one when something goes wrong.
+        try { atomic(path.join(ctx.dir, 'hook.json'), { time: stamp(), event: 'PreCompact', agent: options.agent, extendedPath: typeof given?.transcript_path === 'string' && given.transcript_path !== input.transcript_path, transcript: transcriptFacts(input.transcript_path) }); } catch { /* diagnosis only */ }
+        // Gemini娘 first, before anything that can fail, so she always shows up and can say
+        // when this save didn't work. She stays until her reply.
+        const cycleAt = Date.now();
+        const her = overlayEnabled(ctx);
+        const working = partial => show(ctx, { phase: 'working', lines: workingLines(options.agent, ctx.lang, { partial }), lang: ctx.lang, transcript: options.agent === 'workbuddy' ? null : input.transcript_path, cycle: cycleAt, outside });
+        if (her) { try { await working(false); } catch { /* decoration only */ } }
+        try {
+          if (!input.transcript_path) fail('transcript_unavailable');
+          const captured = enqueue(ctx, input.transcript_path, input.session_id);
+          beginCycle(ctx, { session: input.session_id, agent: options.agent, now: cycleAt });
+          if (her && captured.skippedOlderBytes > 0) { try { await working(true); } catch { /* decoration only */ } }
+          // WorkBuddy has no hook after compaction: count it as finished now, so her reply pops
+          // up as soon as the save lands.
+          if (options.agent === 'workbuddy') { try { await compactionFinished(ctx, { session: input.session_id, agent: options.agent, display: false }); } catch { /* display only */ } }
+          await start(ctx, { outside });
+        } catch (error) {
+          if (her) { try { await show(ctx, { lines: captureFailedLines(safeCode(error), ctx.lang), lang: ctx.lang, cycle: cycleAt, agentPid: 'keep', outside }); } catch { /* decoration only */ } }
+          throw error;
         }
         return ''; // No blocking decision, no raw text, no inherited child pipes.
       }

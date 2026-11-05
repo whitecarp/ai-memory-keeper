@@ -108,8 +108,16 @@ export function redact(text, context = null) {
 }
 
 // Refuse linked paths, including Windows junctions; never follow them for writes.
+// Windows extended-length paths (\\?\C:\…, \\?\UNC\server\…), which some agents pass (Rust's
+// canonicalize returns them), as plain ones: Node's lstat fails on their root with EISDIR.
+export function plainPath(p, platform = process.platform) {
+  if (typeof p !== 'string' || platform !== 'win32') return p;
+  if (/^\\\\\?\\UNC\\/i.test(p)) return '\\\\' + p.slice(8);
+  if (/^\\\\\?\\[A-Za-z]:\\/.test(p)) return p.slice(4);
+  return p;
+}
 export function noLinks(file) {
-  let cur = path.resolve(file);
+  let cur = path.resolve(plainPath(file));
   for (;;) {
     try { if (fs.lstatSync(cur).isSymbolicLink()) fail('linked_path'); }
     catch (e) { if (e.code !== 'ENOENT') throw e; }
