@@ -9,6 +9,7 @@ import { overlaySupported } from './overlay.mjs';
 // `amk doctor`: what an agent needs before following the skill file. Never the key.
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SKILL = path.join(root, 'skills', 'ai-memory-keeper', 'SKILL.md');
+export const OMNI_SKILL = path.join(root, 'skills', 'gemini-omni', 'SKILL.md');
 export const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 
 // A hint only: the agent knows best which agent it is.
@@ -34,6 +35,7 @@ export function doctor(ctx, env = process.env) {
     rules: { antigravity: ruleEnabled(ctx, 'antigravity'), workbuddy: ruleEnabled(ctx, 'workbuddy') },
     overlay: overlaySupported() ? 'Windows desktop pop-up' : 'not on this system; her words show as text only',
     skill: SKILL,
+    omniSkill: OMNI_SKILL,
     next: `Read ${SKILL} and follow it.`,
   };
 }
