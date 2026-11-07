@@ -1,4 +1,4 @@
-import { buildSingleRequest, buildChunkRequest, buildMergeRequest, splitIntoChunks, groupByTokens, callGemini, textFromInteraction } from '../vendor/core.js';
+import { buildSingleRequest, buildChunkRequest, buildMergeRequest, splitIntoChunks, groupByTokens, callGemini, textFromInteraction, parseServiceAccount, exchangeServiceAccountToken, OAUTH_TOKEN_URL } from '../vendor/core.js';
 import { CATEGORIES, validateMemory, mergeLocal, responseSchema, tidyMemory } from './memory.mjs';
 import { fail, redact, redactObject } from './safety.mjs';
 
@@ -32,6 +32,9 @@ export function geminiEngine({ key, cloudKey = null, route = 'auto', fetchImpl =
             fetchImpl: async (url, options) => {
               // Never forward the header through a redirect, nor to a custom endpoint.
               const response = await fetchImpl(url, { ...options, redirect: 'error' });
+              if (String(url).startsWith(OAUTH_TOKEN_URL)) {
+                return { ok: response.ok, status: response.status, statusText: '', json: () => response.json() };
+              }
               return { ok: response.ok, status: response.status, statusText: '', json: async () => {
                 const data = await response.json();
                 const finish = String(data?.candidates?.[0]?.finishReason || '');

@@ -15,8 +15,9 @@
 <p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 <p align="center">
   <a href="#一句话开始"><strong>↓ 一句话安装</strong></a>
-  &nbsp; · &nbsp; <a href="https://gemini-saver-4146a.web.app/">网页版</a>
+  &nbsp; · &nbsp; <a href="https://ai-memory-keeper.web.app/">网页版</a>
   &nbsp; · &nbsp; <a href="#它会做什么">它会做什么</a>
+  &nbsp; · &nbsp; <a href="#密钥与-google-cloud-json-令牌">密钥与 JSON 令牌</a>
   &nbsp; · &nbsp; <a href="#手动安装">手动安装</a>
 </p>
 
@@ -69,23 +70,30 @@ amk.cmd overlay --set preview
 - 关掉：`amk disable --agent claude`（或 codex）。只关弹窗：`amk overlay --set off`。删掉存的 key：`amk key --clear`。
 - 长命令名 `ai-memory-keeper` 和 `amk` 是同一个命令。
 
-## key 存在哪
+## 密钥与 Google Cloud JSON 令牌
 
-优先用环境变量 `GEMINI_API_KEY`；没有的话，用 `amk key` 存在本机的 key：
+| 对比维度 | 方式 A：Google AI Studio 密钥（默认） | 方式 B：Google Cloud JSON 令牌 / Agent Platform |
+| :--- | :--- | :--- |
+| **适用场景** | 免费额度日常使用（`AIza...` 密钥） | 使用 Google Cloud 赠金/结算，或 AI Studio 遇到 `HTTP 402` / `429` / `503` 时自动切换 |
+| **凭证格式** | AI Studio API Key | **服务账号 `.json` 密钥文件**（本地 RS256 签名自动换取 OAuth2 Bearer 令牌）或 Agent Platform API Key |
+| **设置命令** | `amk key` | `amk key --cloud`（弹窗点「选择 JSON 密钥…」或粘贴密钥）<br>或命令行直传：`amk key --cloud --file path/to/key.json` |
+| **网页版支持** | 直接粘贴 API Key | 在 [ai-memory-keeper.web.app](https://ai-memory-keeper.web.app/) 点击 **「导入 JSON 密钥」**，浏览器内本地签名换取令牌 |
 
-- Windows：用 Windows 自带的 DPAPI 为当前用户加密，存在 `~/.ai-memory-keeper/gemini-key.dpapi`。
-- 其他系统：存在 `~/.ai-memory-keeper/gemini-key`，只有当前用户能读（不加密）。
+### 本机加密存储位置
 
-保存时会用一条很短的编造消息检查这个 key，Google 不接受的 key 不会留下。key 不会出现在聊天、命令参数、钩子文件或日志里。已经在运行的代理看不到后来设置的环境变量，存在本机的 key 没有这个问题。
+优先使用环境变量 `GEMINI_API_KEY`；未设置时读取 `amk key` 保存在本机的凭证：
 
-### 第二个 key：Google Cloud Agent Platform（可选）
+- **Windows**：使用系统自带 DPAPI 为当前 Windows 用户加密，保存在 `~/.ai-memory-keeper/gemini-key.dpapi`（Cloud 凭证保存在 `cloud-key.dpapi`）。
+- **macOS / Linux**：保存在 `~/.ai-memory-keeper/gemini-key`（权限 `0600`，仅当前用户可读）。
 
-`amk key --cloud` 会用同样的小窗口，再存一个 Google Cloud Agent Platform 的 API 密钥（在 Cloud 控制台「Agent Platform → API 密钥」页面创建；AI Studio 的 key 在 Agent Platform 用不了）。它的费用记在密钥所在的 Cloud 项目上，走标准的 Cloud 结算。
+保存时会用一条极短的编造消息检查可用性，Google 拒绝的密钥不会保留。密钥与服务账号私钥**绝不**出现在聊天、命令参数、钩子文件或日志里。
 
-- 默认先用 AI Studio 的免费额度；遇到忙（503）、额度用完（429）或预付费余额为 0（402）时，这一次保存改走 Agent Platform。
-- `amk route --set cloud` 改成先走 Agent Platform（付费层的内容不会被 Google 用来改进产品）；`--set auto` 改回来。
-- `amk status` 的 `lastSaveVia` 写着最近一次是哪个保存的：`studio` 或 `cloud`。`amk gemini-check --cloud` 单独检查这个 key。
-- 按 Google 的说明，Cloud 的 $300 免费试用赠金不能付 AI Studio 的 Gemini API 费用；Agent Platform 是否能用某笔赠金，以 Cloud 结算里的赠金说明为准。先在 Cloud 结算里设一个预算提醒。
+### 自动切换与路由控制
+
+- **默认自动回退（`auto`）**：先走 AI Studio 免费额度；遇到繁忙（`503`）、限额（`429`）或预付费余额为 0（`402`）时，自动改用已保存的 Google Cloud JSON 令牌 / Agent Platform 密钥完成保存。
+- **优先走 Google Cloud（`cloud`）**：运行 `amk route --set cloud` 可直接优先走 Google Cloud（付费/赠金层内容不会被 Google 用于改进产品）；运行 `amk route --set auto` 切回默认。
+- **状态与单独自检**：`amk status` 中的 `lastSaveVia` 会显示最近一次保存走的是 `studio` 还是 `cloud`；运行 `amk gemini-check --cloud` 可单独测试 Google Cloud JSON 令牌或密钥。
+- **结算提醒**：Google Cloud 的免费试用赠金无法抵扣 AI Studio 费用，但可用于标准 Cloud 结算的 Google Cloud 服务；建议先在 Cloud 结算控制台设置预算提醒。
 
 ## 会改动哪些文件
 

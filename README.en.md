@@ -15,8 +15,9 @@
 <p align="center"><a href="README.md">简体中文</a> · <strong>English</strong></p>
 <p align="center">
   <a href="#one-message-to-start"><strong>↓ One-line install</strong></a>
-  &nbsp; · &nbsp; <a href="https://gemini-saver-4146a.web.app/?lang=en">Web version</a>
+  &nbsp; · &nbsp; <a href="https://ai-memory-keeper.web.app/?lang=en">Web version</a>
   &nbsp; · &nbsp; <a href="#what-it-does">What it does</a>
+  &nbsp; · &nbsp; <a href="#keys--google-cloud-json-token">Keys &amp; JSON token</a>
   &nbsp; · &nbsp; <a href="#manual-install">Manual install</a>
 </p>
 
@@ -69,23 +70,30 @@ amk.cmd overlay --set preview
 - Turn off: `amk disable --agent claude` (or codex). The pop-up alone: `amk overlay --set off`. Remove the stored key: `amk key --clear`.
 - `ai-memory-keeper` is the long name of the same command as `amk`.
 
-## Where the key is kept
+## Keys & Google Cloud JSON token
 
-`GEMINI_API_KEY` is used if it's set. Otherwise, the key stored on this computer by `amk key`:
+| Feature | Option A: Google AI Studio key (default) | Option B: Google Cloud JSON token / Agent Platform |
+| :--- | :--- | :--- |
+| **Best for** | Everyday free-tier usage (`AIza...` key) | Using Google Cloud credits/billing, or automatic fallback when AI Studio hits `HTTP 402` / `429` / `503` |
+| **Credential format** | AI Studio API key | **Service Account `.json` key file** (locally signed via RS256 JWT for an OAuth2 Bearer token) or Agent Platform API key |
+| **CLI setup** | `amk key` | `amk key --cloud` (click "Pick JSON key..." in the window or paste a key)<br>or pass a file directly: `amk key --cloud --file path/to/key.json` |
+| **Web version** | Paste API key directly | Click **"Import JSON key"** on [ai-memory-keeper.web.app](https://ai-memory-keeper.web.app/?lang=en) (signs locally in your browser via WebCrypto) |
 
-- Windows: encrypted with Windows' own DPAPI for the current user, in `~/.ai-memory-keeper/gemini-key.dpapi`.
-- Other systems: in `~/.ai-memory-keeper/gemini-key`, readable only by the current user (not encrypted).
+### Where keys are kept
 
-When it's saved, the key is checked with one short made-up message, and a key Google rejects isn't kept. The key never appears in the chat, command arguments, hook files or logs. An agent that's already running can't see environment variables set later; a stored key doesn't have that problem.
+`GEMINI_API_KEY` is used if set. Otherwise, `amk key` stores your credential on this computer:
 
-### A second key: Google Cloud Agent Platform (optional)
+- **Windows**: encrypted with Windows DPAPI for the current user in `~/.ai-memory-keeper/gemini-key.dpapi` (and `cloud-key.dpapi` for Google Cloud).
+- **macOS / Linux**: in `~/.ai-memory-keeper/gemini-key` (`0600`, readable only by the current user).
 
-`amk key --cloud` stores a Google Cloud Agent Platform API key with the same small window. Create it on the Cloud console's "Agent Platform > API keys" page; an AI Studio key doesn't work on Agent Platform. Its usage is billed to the key's Cloud project, on standard Cloud billing.
+When saved, the credential is checked with one tiny made-up request; anything Google rejects isn't kept. Your key or Service Account private key never appears in chat, command arguments, hook files or logs.
 
-- By default the free AI Studio tier goes first. When it's busy (503), out of quota (429) or stopped by a $0 Prepay balance (402), that save goes to Agent Platform instead.
-- `amk route --set cloud` sends saves to Agent Platform first (Google doesn't use paid-tier prompts to improve its products); `--set auto` switches back.
-- `lastSaveVia` in `amk status` says which one saved last: `studio` or `cloud`. `amk gemini-check --cloud` checks that key on its own.
-- Per Google, the $300 Cloud free-trial credit can't pay for the Gemini API in AI Studio; whether a given credit covers Agent Platform is shown with that credit in Cloud Billing. Set a budget alert in Cloud Billing first.
+### Automatic fallback & routing
+
+- **Default fallback (`auto`)**: tries the free AI Studio tier first. When it's busy (`503`), rate-limited (`429`) or stopped by a `$0` Prepay balance (`402`), that save automatically switches to your Google Cloud JSON token or Agent Platform key.
+- **Google Cloud first (`cloud`)**: `amk route --set cloud` sends saves to Google Cloud first (Google doesn't use paid-tier prompts to improve its products); `amk route --set auto` switches back.
+- **Status & check**: `lastSaveVia` in `amk status` shows `studio` or `cloud`. `amk gemini-check --cloud` tests your Google Cloud JSON token or key on its own.
+- **Billing note**: Cloud free-trial credits can't pay for AI Studio's Gemini API, but apply to eligible standard-billed Google Cloud services. Set a budget alert in Cloud Billing first.
 
 ## Files it changes
 

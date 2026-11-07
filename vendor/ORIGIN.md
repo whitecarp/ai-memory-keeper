@@ -1,8 +1,8 @@
 # Shared core provenance
 
-`core.js` is a byte-for-byte copy of this project's `app/public/core.js` (web app 0.2.1), copied read-only on 2026-11-04 and refreshed on 2026-11-05 after the web core gained the Google Cloud Agent Platform route (HTTP 402 fix).
+`core.js` is a byte-for-byte copy of this project's `app/public/core.js` (web app 0.2.1), copied read-only on 2026-11-04 and refreshed on 2026-11-06 after the web core gained Google Cloud Service Account JSON (`JSON 令牌`) OAuth2 Bearer token exchange on Agent Platform.
 
-SHA-256: `b2b9db176da226fe257b525e41853d61d3a02bfc2a815b0180dfa45914110d32`
+SHA-256: `3a531685657236446a09f7aa658edf1d437f49f1bf1b9c7eb93a16891238f830`
 
 The CLI imports its prompt builders, chunking/grouping, merge prompts, Gemini transport, interaction text extraction and retry policy. It extends the response schema with ranked/dated evidence and the work profile; strict validation happens before any CLI memory commit because the web core's normalizer is intentionally permissive.
 

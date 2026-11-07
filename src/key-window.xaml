@@ -15,10 +15,18 @@
       </TextBlock>
       <PasswordBox x:Name="Key" FontSize="14" Padding="8,6" Background="#161D52" Foreground="#EEF0FF" BorderBrush="#A77BFF" CaretBrush="#EEF0FF"/>
       <TextBlock x:Name="Note" Foreground="#FFD27A" FontSize="12.5" TextWrapping="Wrap" Margin="0,8,0,0"/>
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-        <Button x:Name="Cancel" MinWidth="84" Padding="12,5" Margin="0,0,8,0" IsCancel="True"/>
-        <Button x:Name="Save" MinWidth="84" Padding="12,5" IsDefault="True"/>
-      </StackPanel>
+      <Grid Margin="0,14,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <Button x:Name="PickJson" Grid.Column="0" MinWidth="110" Padding="10,5" HorizontalAlignment="Left"/>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button x:Name="Cancel" MinWidth="84" Padding="12,5" Margin="0,0,8,0" IsCancel="True"/>
+          <Button x:Name="Save" MinWidth="84" Padding="12,5" IsDefault="True"/>
+        </StackPanel>
+      </Grid>
     </StackPanel>
   </Border>
 </Window>

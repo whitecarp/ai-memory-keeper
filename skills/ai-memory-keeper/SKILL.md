@@ -13,14 +13,15 @@ Do these steps in order, in the person's language. **Before anything else, tell 
 
 1. Run `amk doctor` from the project's root folder and read its JSON. If `node.ok` is false, install Node.js 22 or newer (`node.get` says how), then run it again. On Windows PowerShell, always call `npm.cmd` and `amk.cmd` (the `.ps1` versions are often blocked by the execution policy); never change the policy.
 
-2. **The key comes first** (skip this step in Antigravity, and for WorkBuddy's `--rule` mode: those need no key). If `key.set` is false, run `amk key` now.
-   - On Windows it opens a small window on this computer. There they paste their Gemini API key, and can create one free through the window's link to Google AI Studio.
+2. **The key comes first** (skip this step in Antigravity, and for WorkBuddy's `--rule` mode: those need no key). If `key.set` is false, run `amk key` now (or `amk key --cloud` if they want to use a Google Cloud Service Account JSON key or Agent Platform API key right away).
+   - On Windows it opens a small window on this computer. There they paste their Gemini API key (or click **Pick JSON key... / 选择 JSON 密钥…** to load a Google Cloud Service Account `.json` file), and can create one free through the window's link to Google AI Studio.
+   - When a Google Cloud Service Account JSON (`type: "service_account"`) is chosen, AI Memory Keeper encrypts it locally with DPAPI and automatically exchanges it via RS256 JWT (`https://oauth2.googleapis.com/token`) for a short-lived OAuth2 Bearer token to call Google Cloud's global endpoint (`aiplatform.googleapis.com`).
    - The window checks the key with one short made-up request and tells them "OK", or the reason in plain words.
    - Tell them, in one sentence, to paste it into that window, never into this chat.
    - While the window is open, ask your one question: **work** profile (preferences, decisions, project conventions) or **companion** (a character's relationship and shared moments)? If they don't mind, use work.
    - If they close the window without a key, carry on anyway. Tell them in one sentence that each compaction is still kept and queued, and is sorted once they run `amk key`.
-   - If no window appears (a sandbox can block it), ask them to run `amk.cmd key` in their own PowerShell (`amk key` elsewhere).
-   - Outside Windows, ask them to run `amk key --terminal` in their own terminal.
+   - If no window appears (a sandbox can block it), ask them to run `amk.cmd key` (or `amk.cmd key --cloud --file path\to\service-account.json`) in their own PowerShell (`amk key` elsewhere).
+   - Outside Windows, ask them to run `amk key --terminal` (or `amk key --cloud --file path/to/service-account.json`) in their own terminal.
    - Never ask for the key, read it, print it or put it in a command.
 
 3. Turn on auto mode for **the agent you are**. `agent.guess` in the doctor output is only a hint.
@@ -39,4 +40,4 @@ Do these steps in order, in the person's language. **Before anything else, tell 
    - From now on, each compaction saves and brings back memories by itself.
    - On Gemini's free tier, Google may use what's sent to improve its products, so it's not for sensitive or confidential chats.
    - Check: `amk status`. Turn off: `amk disable --agent <claude|codex>`. The pop-up alone: `amk overlay --set off`.
-   - Only if they ask about billing or Cloud credits, or a save fails with `gemini_prepay` (HTTP 402): they can add a Google Cloud Agent Platform key with `amk key --cloud` (the same kind of window). Saves then go to it only when the free AI Studio tier is busy or used up; `amk route --set cloud` makes it go first.
+   - Only if they ask about billing, Cloud credits, or a Google Cloud Service Account JSON key, or if a save fails with `gemini_prepay` (HTTP 402): they can add a Google Cloud credential with `amk key --cloud` (in the window, either paste an Agent Platform API key or click **Pick JSON key... / 选择 JSON 密钥…** to select their Service Account `.json` key; or run `amk.cmd key --cloud --file path\to\key.json` in their own terminal). Saves then go to Google Cloud automatically when the free AI Studio tier is busy, out of quota, or at $0 Prepay; `amk route --set cloud` makes Google Cloud go first.

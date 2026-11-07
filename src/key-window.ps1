@@ -22,8 +22,9 @@ try {
   $open = { param($u) if ($u -like 'https://aistudio.google.com/*' -or $u -like 'https://docs.cloud.google.com/*') { Start-Process $u } }
   $w.FindName('GetKey').Add_Click({ & $open ([string]$t.keyPage) })
   $w.FindName('Regions').Add_Click({ & $open ([string]$t.regionsPage) })
-  $save = $w.FindName('Save'); $cancel = $w.FindName('Cancel')
+  $save = $w.FindName('Save'); $cancel = $w.FindName('Cancel'); $pick = $w.FindName('PickJson')
   $save.Content = [string]$t.save; $cancel.Content = [string]$t.cancel
+  if ($pick -and $t.pickJson) { $pick.Content = [string]$t.pickJson } elseif ($pick) { $pick.Visibility = 'Collapsed' }
   $box = $w.FindName('Key'); $note = $w.FindName('Note')
   $state = @{ result = 'cancelled'; proc = $null; started = $null }
   $done = New-Object Windows.Threading.DispatcherTimer; $done.Interval = [TimeSpan]::FromMilliseconds(1600)
@@ -43,21 +44,38 @@ try {
       $state.result = 'saved'; $note.Foreground = & $brush '#95F0C8'; $note.Text = [string]$r.reason; $done.Start()
     } elseif ($r -and -not $r.kept) {
       $state.result = 'rejected'; $note.Text = [string]$r.reason
-      $save.IsEnabled = $true; $box.IsEnabled = $true; [void]$box.Focus()
+      $save.IsEnabled = $true; $box.IsEnabled = $true; if ($pick) { $pick.IsEnabled = $true }; [void]$box.Focus()
     } else {
       $state.result = 'saved'; $note.Text = $(if ($r) { [string]$r.reason } else { [string]$t.slow })
     }
   })
-  $save.Add_Click({
-    $k = $box.Password.Trim()
-    if ($k -notmatch '^[\x21-\x7e]{20,200}$') { $note.Text = [string]$t.invalid; return }
+  $normalize = {
+    param($raw)
+    $s = [string]$raw
+    if ($null -eq $s) { return $null }
+    $s = $s.Trim()
+    if ($s.StartsWith('{') -and $s.EndsWith('}')) {
+      try {
+        $j = $s | ConvertFrom-Json
+        if ($j.type -eq 'service_account' -and $j.project_id -and $j.client_email -and ([string]$j.private_key).Contains('BEGIN PRIVATE KEY')) {
+          return (@{ type = 'service_account'; project_id = [string]$j.project_id; client_email = [string]$j.client_email; private_key = [string]$j.private_key; token_uri = 'https://oauth2.googleapis.com/token' } | ConvertTo-Json -Compress)
+        }
+      } catch {}
+    }
+    if ($s -match '^[\x21-\x7e]{20,200}$') { return $s }
+    return $null
+  }
+  $commitKey = {
+    param($raw)
+    $k = & $normalize $raw
+    if (-not $k) { $note.Text = [string]$t.invalid; return }
     $enc = [Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($k), [Text.Encoding]::UTF8.GetBytes($Entropy), 'CurrentUser')
     $k = $null
     $tmp = $KeyFile + '.tmp'
     [IO.File]::WriteAllBytes($tmp, $enc)
     Move-Item -LiteralPath $tmp -Destination $KeyFile -Force
     $box.Clear(); $state.result = 'saved'
-    $save.IsEnabled = $false; $box.IsEnabled = $false; $cancel.Content = [string]$t.close
+    $save.IsEnabled = $false; $box.IsEnabled = $false; if ($pick) { $pick.IsEnabled = $false }; $cancel.Content = [string]$t.close
     $note.Foreground = & $brush '#FFD27A'; $note.Text = [string]$t.checking
     # The check reads the stored key itself: nothing secret on this command line.
     $psi = New-Object Diagnostics.ProcessStartInfo($NodeExe)
@@ -68,7 +86,17 @@ try {
     $state.started = Get-Date
     $state.proc = [Diagnostics.Process]::Start($psi)
     $poll.Start()
-  })
+  }
+  $save.Add_Click({ & $commitKey $box.Password })
+  if ($pick) {
+    $pick.Add_Click({
+      $dlg = New-Object Microsoft.Win32.OpenFileDialog
+      $dlg.Filter = 'JSON (*.json)|*.json'
+      if ($dlg.ShowDialog() -eq $true) {
+        try { & $commitKey ([IO.File]::ReadAllText($dlg.FileName, [Text.Encoding]::UTF8)) } catch { $note.Text = [string]$t.invalid }
+      }
+    })
+  }
   $w.Add_ContentRendered({ [void]$w.Activate(); [void]$box.Focus() })
   [void]$w.ShowDialog()
   [IO.File]::WriteAllText($ResultFile, $state.result)

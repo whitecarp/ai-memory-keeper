@@ -141,3 +141,39 @@ test('the Agent Platform key window: its own file and entropy, Google Cloud link
   const ps = fs.readFileSync(new URL('../src/key-window.ps1', import.meta.url), 'utf8');
   assert.ok(ps.includes("-like 'https://docs.cloud.google.com/*'") && ps.includes("' --cloud'"));
 });
+
+test('Service Account JSON file: imported via amk key --cloud --file and exchanged for Bearer token on Agent Platform', async t => {
+  const { generateKeyPairSync } = await import('node:crypto');
+  const f = fixture(t);
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+  const saJson = JSON.stringify({
+    type: 'service_account',
+    project_id: 'cli-proj-456',
+    client_email: 'cli@cli-proj-456.iam.gserviceaccount.com',
+    private_key: privateKey,
+  });
+  const saFile = `${f.home}/sa.json`;
+  fs.mkdirSync(f.home, { recursive: true });
+  fs.writeFileSync(saFile, saJson, 'utf8');
+
+  const realFetch = globalThis.fetch;
+  const seen = [];
+  t.after(() => { globalThis.fetch = realFetch; });
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), auth: init?.headers?.Authorization });
+    if (String(url).includes('oauth2.googleapis.com/token')) {
+      return reply(200, { access_token: 'ya29.cli-token', expires_in: 3600 });
+    }
+    return reply(200, cloudAnswer);
+  };
+
+  const res = await run(['key', '--cloud', '--file', saFile, '--project', f.project, '--home', f.home]);
+  assert.equal(res.saved, true);
+  assert.equal(res.kind, 'cloud');
+  assert.equal(res.format, 'service_account_json');
+  assert.equal(keyStatus(f.ctx).cloud.set, true);
+  const chk = await run(['key-check', '--cloud', '--project', f.project, '--home', f.home]);
+  assert.equal(chk.ok, true);
+  assert.ok(seen.some(c => c.url.includes('oauth2.googleapis.com/token')));
+  assert.ok(seen.some(c => c.url.includes('/projects/cli-proj-456/locations/global/publishers/google/models/gemini-3.8-flash:generateContent') && c.auth === 'Bearer ya29.cli-token'));
+});

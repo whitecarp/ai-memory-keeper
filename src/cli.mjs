@@ -20,7 +20,7 @@ import { compactionFinished, saveLanded, saveFailed, recalled, lateDue, awaiting
 export function parse(argv) {
   const [command = 'help', ...rest] = argv; const options = {};
   const flags = new Set(['background', 'clear', 'wait', 'terminal', 'cloud', 'rule']);
-  const values = new Set(['project', 'home', 'profile', 'name', 'agent', 'transcript', 'summary', 'model', 'lang', 'owner', 'set']);
+  const values = new Set(['project', 'home', 'profile', 'name', 'agent', 'transcript', 'summary', 'model', 'lang', 'owner', 'set', 'file']);
   for (let i = 0; i < rest.length; i++) {
     if (!rest[i].startsWith('--')) fail('invalid_arguments');
     const key = rest[i].slice(2);
@@ -62,7 +62,7 @@ const HELP = `AI Memory Keeper · amk (also: ai-memory-keeper), Node 22+
   doctor                          What's ready, and the skill file an agent should follow
   key                             Store your Gemini API key on this computer (Windows: a small window)
   key --terminal | --clear        Type it in this terminal instead (hidden), or remove it
-  key --cloud                     The same for a Google Cloud Agent Platform key (Cloud billing)
+  key --cloud [--file JSON]       Store a Google Cloud key or Service Account JSON (exchanged for OAuth2 token)
   route --set auto|cloud          Which goes first: AI Studio (auto, default) or Agent Platform
   enable --agent claude|codex|workbuddy   Merge only this tool's project hooks
   disable --agent claude|codex|workbuddy  Remove exactly those hooks
@@ -103,8 +103,14 @@ export async function run(argv, dependencies = {}) {
     if (command === 'key') {
       const kind = options.cloud ? 'cloud' : 'studio';
       if (options.clear) return clearKey(ctx, process.platform, kind);
+      if (options.file) {
+        const target = path.resolve(options.file);
+        noLinks(target);
+        if (!fs.existsSync(target) || fs.statSync(target).size > 64 * 1024) fail('invalid_key_format');
+        return saveKey(ctx, fs.readFileSync(target, 'utf8'), process.platform, kind);
+      }
       if (process.platform === 'win32' && !options.terminal) return await (dependencies.openKeyWindow || openKeyWindow)(ctx, { wait: !!options.wait, kind });
-      const typed = await (dependencies.promptKey || promptKey)(ctx.lang === 'en' ? 'Gemini API key (hidden): ' : 'Gemini API key（输入时不显示）：');
+      const typed = await (dependencies.promptKey || promptKey)(ctx.lang === 'en' ? 'Gemini API key or Service Account JSON (hidden): ' : 'Gemini API key 或服务账号 JSON（输入时不显示）：');
       return saveKey(ctx, typed, process.platform, kind);
     }
     if (command === 'overlay') {

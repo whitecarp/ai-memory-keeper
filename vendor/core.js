@@ -16,7 +16,108 @@ export const API_URL = 'https://generativelanguage.googleapis.com/v1beta/interac
 // AI Studio's own billing page: Cloud trial/Welcome credit can't pay for the Gemini API, and a
 // Prepay account at $0 stops every Gemini API call it pays for (HTTP 402).
 export const CLOUD_API_BASE = 'https://aiplatform.googleapis.com/v1/publishers/google/models/';
-export const cloudUrl = (model) => `${CLOUD_API_BASE}${encodeURIComponent(model)}:generateContent`;
+export const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+export const cloudUrl = (model, projectId = null) => projectId
+  ? `https://aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/global/publishers/google/models/${encodeURIComponent(model)}:generateContent`
+  : `${CLOUD_API_BASE}${encodeURIComponent(model)}:generateContent`;
+
+// Detects a Google Cloud Service Account JSON key (type: "service_account") so the browser
+// or CLI can exchange it via RS256 JWT for an OAuth2 Bearer token automatically.
+export function parseServiceAccount(raw) {
+  if (!raw) return null;
+  let obj = raw;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (!t.startsWith('{') || !t.endsWith('}')) return null;
+    try { obj = JSON.parse(t); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || obj.type !== 'service_account') return null;
+  const project_id = typeof obj.project_id === 'string' ? obj.project_id.trim() : '';
+  const client_email = typeof obj.client_email === 'string' ? obj.client_email.trim() : '';
+  const private_key = typeof obj.private_key === 'string' ? obj.private_key.trim() : '';
+  if (!project_id || !client_email || !private_key.includes('BEGIN PRIVATE KEY')) return null;
+  return { type: 'service_account', project_id, client_email, private_key, token_uri: OAUTH_TOKEN_URL };
+}
+
+function b64urlBytes(bytes) {
+  let bin = '';
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+  return btoa(bin).replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function b64urlText(str) {
+  return b64urlBytes(new TextEncoder().encode(str));
+}
+
+function pemToDer(pem) {
+  const b64 = String(pem).replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s+/g, '');
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+const tokenCache = new Map();
+export function clearTokenCache() { tokenCache.clear(); }
+
+// Exchanges a Service Account JSON key for a short-lived OAuth2 Bearer token using standard
+// WebCrypto RS256 JWT signing (works in both browsers and Node 22+ with zero dependencies).
+export async function exchangeServiceAccountToken(sa, { signal, fetchImpl = fetch, nowSec = () => Math.floor(Date.now() / 1000) } = {}) {
+  const parsed = parseServiceAccount(sa);
+  if (!parsed) throw new GeminiError('cloudkey', 'Invalid service account JSON', 400);
+  const now = nowSec();
+  const cacheKey = `${parsed.project_id}:${parsed.client_email}`;
+  const cached = tokenCache.get(cacheKey);
+  if (cached && cached.expiresAt - 60 > now) return { token: cached.token, projectId: parsed.project_id };
+
+  let signature;
+  const unsigned = `${b64urlText(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))}.${b64urlText(JSON.stringify({
+    iss: parsed.client_email,
+    sub: parsed.client_email,
+    aud: OAUTH_TOKEN_URL,
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+  }))}`;
+  try {
+    const cryptoKey = await globalThis.crypto.subtle.importKey(
+      'pkcs8',
+      pemToDer(parsed.private_key),
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const sigBuf = await globalThis.crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(unsigned));
+    signature = b64urlBytes(new Uint8Array(sigBuf));
+  } catch (e) {
+    throw new GeminiError('cloudkey', `Service account key error: ${e.message || 'invalid private_key'}`, 400);
+  }
+
+  let res;
+  try {
+    res = await fetchImpl(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=${encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer')}&assertion=${encodeURIComponent(`${unsigned}.${signature}`)}`,
+      signal,
+      credentials: 'omit',
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+    });
+  } catch (e) {
+    if (signal?.aborted) throw new GeminiError('aborted');
+    throw new GeminiError('network', e.message);
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.access_token) {
+    const msg = data?.error_description || data?.error?.message || data?.error || res.statusText || 'token exchange failed';
+    throw new GeminiError('cloudkey', String(msg), res.status || 401);
+  }
+  const ttl = Number(data.expires_in) > 120 ? Number(data.expires_in) : 3600;
+  tokenCache.set(cacheKey, { token: data.access_token, expiresAt: now + ttl });
+  return { token: data.access_token, projectId: parsed.project_id };
+}
 
 // Each of these takes 1,048,576 input tokens and returns up to 65,536.
 export const MODELS = [
@@ -483,15 +584,25 @@ const sleep = (ms, signal) =>
 export const BACKOFF_MS = [5000, 15000, 30000];
 
 // route: 'studio' sends to AI Studio's Gemini API (Interactions), 'cloud' to Agent Platform
-// (generateContent, billed to the Cloud project). The body is always the Interactions form.
+// (generateContent, billed to the Cloud project). When `key` is a Google Cloud Service Account
+// JSON (`type: "service_account"`), it is automatically exchanged for an OAuth2 Bearer token
+// and sent to the project's global Agent Platform endpoint.
 export async function callGemini({ body, key, route = 'studio', signal, onWait, fetchImpl = fetch, backoff = BACKOFF_MS }) {
-  const cloud = route === 'cloud';
+  const sa = parseServiceAccount(key);
+  const cloud = route === 'cloud' || Boolean(sa);
   for (let attempt = 0; ; attempt++) {
     let res;
+    let authHeader = { 'x-goog-api-key': key };
+    let url = cloud ? cloudUrl(body.model) : API_URL;
+    if (sa) {
+      const { token, projectId } = await exchangeServiceAccountToken(sa, { signal, fetchImpl });
+      authHeader = { Authorization: `Bearer ${token}` };
+      url = cloudUrl(body.model, projectId);
+    }
     try {
-      res = await fetchImpl(cloud ? cloudUrl(body.model) : API_URL, {
+      res = await fetchImpl(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify(cloud ? toCloudBody(body) : body),
         signal,
         credentials: 'omit',
@@ -542,6 +653,10 @@ export async function callGemini({ body, key, route = 'studio', signal, onWait, 
 // refuses the key too, the first error stands, with cloudStatus and cloudMessage (Google's
 // own words) set. The CLI does the same with two separate keys.
 export async function callGeminiAuto({ route = 'auto', onRoute, ...opts }) {
+  if (parseServiceAccount(opts.key)) {
+    onRoute?.('cloud');
+    return callGemini({ ...opts, route: 'cloud' });
+  }
   if (route !== 'auto') return callGemini({ ...opts, route });
   try {
     return await callGemini({ ...opts, route: 'studio' });

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { fail, noLinks } from './safety.mjs';
 import { encodedScript, psArgs, inlineArgs, psQuote } from './powershell.mjs';
 import { spawnOutside } from './outside.mjs';
+import { parseServiceAccount } from '../vendor/core.js';
 
 // The person's Gemini API key, kept only on this computer, so an agent that is already
 // running doesn't need GEMINI_API_KEY in its environment. GEMINI_API_KEY still wins.
@@ -77,8 +78,10 @@ export async function resolveKey(ctx, env = process.env) { return env.GEMINI_API
 export async function resolveCloudKey(ctx) { return storedKey(ctx, process.platform, 'cloud'); }
 
 export function saveKey(ctx, key, platform = process.platform, kind = 'studio') {
-  key = String(key ?? '').trim();
-  if (!KEY_SHAPE.test(key)) fail('invalid_key_format');
+  const raw = String(key ?? '').trim();
+  const sa = parseServiceAccount(raw);
+  if (!sa && !KEY_SHAPE.test(raw)) fail('invalid_key_format');
+  key = sa ? JSON.stringify(sa) : raw;
   fs.mkdirSync(ctx.home, { recursive: true });
   const file = keyFile(ctx, platform, kind);
   noLinks(file);
@@ -87,7 +90,7 @@ export function saveKey(ctx, key, platform = process.platform, kind = 'studio') 
     fs.writeFileSync(tmp, key + '\n', { mode: 0o600 });
     fs.renameSync(tmp, file);
     try { fs.chmodSync(file, 0o600); } catch { /* best effort */ }
-    return { saved: true, kind: kind === 'cloud' ? 'cloud' : 'studio', where: storedFrom(platform) };
+    return { saved: true, kind: kind === 'cloud' ? 'cloud' : 'studio', format: sa ? 'service_account_json' : 'api_key', where: storedFrom(platform) };
   }
   // The key goes to PowerShell on stdin and is encrypted there.
   const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; $k=[Console]::In.ReadToEnd().Trim(); `
@@ -95,7 +98,7 @@ export function saveKey(ctx, key, platform = process.platform, kind = 'studio') 
     + `$t=${psQuote(file + '.tmp')}; [IO.File]::WriteAllBytes($t, $b); Move-Item -LiteralPath $t -Destination ${psQuote(file)} -Force`;
   const r = spawnSync('powershell.exe', inlineArgs(script), { input: key, windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] });
   if (r.status !== 0 || !fs.existsSync(file)) fail('key_save_failed');
-  return { saved: true, kind: kind === 'cloud' ? 'cloud' : 'studio', where: storedFrom(platform) };
+  return { saved: true, kind: kind === 'cloud' ? 'cloud' : 'studio', format: sa ? 'service_account_json' : 'api_key', where: storedFrom(platform) };
 }
 export function clearKey(ctx, platform = process.platform, kind = 'studio') {
   const file = keyFile(ctx, platform, kind);
@@ -157,18 +160,18 @@ export const CLOUD_KEY_PAGE = 'https://docs.cloud.google.com/gemini-enterprise-a
 export const BUDGET_PAGE = 'https://docs.cloud.google.com/billing/docs/how-to/budgets';
 const CLOUD_LABELS = {
   zh: {
-    title: 'AI 记忆守护者 · Agent Platform API 密钥',
-    head: '把 Google Cloud Agent Platform 的 API 密钥粘贴到这里',
-    body: '它只保存在这台电脑上，为当前 Windows 用户加密，不会出现在聊天里。用它保存时，费用记在密钥所在的 Cloud 项目上。',
-    getKey: '怎么创建：Google 的说明（Agent Platform → API 密钥）',
+    title: 'AI 记忆守护者 · Google Cloud 密钥 / JSON 令牌',
+    head: '粘贴 Agent Platform API 密钥，或选择 Google Cloud 服务账号 JSON 密钥文件',
+    body: '它只保存在这台电脑上，为当前 Windows 用户加密，不会出现在聊天里。若选择服务账号 JSON 文件，会自动用本地 RS256 签名换取 OAuth2 令牌调用 Google Cloud。',
+    getKey: '怎么创建：Google 的说明（Agent Platform → API 密钥 / 服务账号 JSON）',
     rules: '默认先用 AI Studio 的免费额度，忙或额度用完时才改用这个密钥。建议先在 Cloud 结算里设一个预算提醒。',
     regions: '设置预算提醒（官方）',
   },
   en: {
-    title: 'AI Memory Keeper · Agent Platform API key',
-    head: 'Paste your Google Cloud Agent Platform API key here',
-    body: "It stays on this computer only, encrypted for your Windows user, and never goes into the chat. Saves made with it are billed to the key's Cloud project.",
-    getKey: "How to create one: Google's guide (Agent Platform > API keys)",
+    title: 'AI Memory Keeper · Google Cloud key / JSON token',
+    head: 'Paste an Agent Platform API key, or pick a Google Cloud Service Account JSON file',
+    body: "It stays on this computer only, encrypted for your Windows user, and never goes into the chat. A Service Account JSON file is automatically exchanged via RS256 JWT for an OAuth2 Bearer token.",
+    getKey: "How to create one: Google's guide (Agent Platform > API keys / Service Account JSON)",
     rules: "By default the free AI Studio tier goes first; this key is used only when that's busy or out of quota. Set a budget alert in Cloud Billing first.",
     regions: 'Set a budget alert (official)',
   },
@@ -176,25 +179,25 @@ const CLOUD_LABELS = {
 const LABELS = {
   zh: {
     title: 'AI 记忆守护者 · Gemini API key',
-    head: '把你的 Gemini API key 粘贴到这里',
+    head: '把你的 Gemini API key 粘贴到这里（或选择 Google Cloud JSON 密钥）',
     body: '它只保存在这台电脑上，为当前 Windows 用户加密，不会出现在聊天里。',
     getKey: '还没有 key？去 Google AI Studio 免费创建',
     rules: '需要年满 18 岁，并且身处 Gemini API 开放的地区（中国大陆和香港不在其中）。',
     regions: '可用地区列表（官方）',
-    save: '保存', cancel: '取消', close: '关闭',
-    invalid: '这看起来不像 API key，请再检查一下。',
+    save: '保存', cancel: '取消', close: '关闭', pickJson: '选择 JSON 密钥…',
+    invalid: '这看起来不像有效的 API key 或 Google Cloud 服务账号 JSON，请再检查一下。',
     checking: '已保存，正在用一条很短的编造消息检查这个 key……',
     slow: '检查有点慢。key 已经保存，可以先关掉这个窗口。',
   },
   en: {
     title: 'AI Memory Keeper · Gemini API key',
-    head: 'Paste your Gemini API key here',
+    head: 'Paste your Gemini API key here (or pick a Google Cloud JSON key)',
     body: 'It stays on this computer only, encrypted for your Windows user, and never goes into the chat.',
     getKey: 'No key yet? Create one free in Google AI Studio',
     rules: 'You need to be 18 or older and in a region where the Gemini API is available (mainland China and Hong Kong are not).',
     regions: 'Available regions (official)',
-    save: 'Save', cancel: 'Cancel', close: 'Close',
-    invalid: "That doesn't look like an API key. Please check it.",
+    save: 'Save', cancel: 'Cancel', close: 'Close', pickJson: 'Pick JSON key...',
+    invalid: "That doesn't look like a valid API key or Google Cloud Service Account JSON. Please check it.",
     checking: 'Saved. Checking the key with one short made-up message...',
     slow: 'The check is slow. The key is saved; you can close this window.',
   },
@@ -250,8 +253,9 @@ export async function openKeyWindow(ctx, { wait = false, kind = 'studio', spawnI
 export async function promptKey(label, input = process.stdin, output = process.stderr) {
   if (!input.isTTY) {
     let text = '';
-    for await (const chunk of input) { text += chunk; if (text.length > 4096) break; }
-    return text.split(/\r?\n/)[0];
+    for await (const chunk of input) { text += chunk; if (text.length > 16384) break; }
+    const trimmed = text.trim();
+    return trimmed.startsWith('{') ? trimmed : text.split(/\r?\n/)[0];
   }
   output.write(label);
   return new Promise((resolve, reject) => {
