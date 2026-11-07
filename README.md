@@ -95,6 +95,18 @@ amk.cmd overlay --set preview
 - **状态与单独自检**：`amk status` 中的 `lastSaveVia` 会显示最近一次保存走的是 `studio` 还是 `cloud`；运行 `amk gemini-check --cloud` 可单独测试 Google Cloud JSON 令牌或密钥。
 - **结算提醒**：Google Cloud 的免费试用赠金无法抵扣 AI Studio 费用，但可用于标准 Cloud 结算的 Google Cloud 服务；建议先在 Cloud 结算控制台设置预算提醒。
 
+### 部署后用同一份 JSON 令牌调用 Gemini Omni 生成视频
+
+部署好 AI Memory Keeper 并通过 `amk key --cloud` 导入 Google Cloud 服务账号 `.json` 密钥后，你还可以直接让代理读取内置技能 [`skills/gemini-omni/SKILL.md`](skills/gemini-omni/SKILL.md)，指导你用同一份加密保存的 JSON 令牌调用 Google Cloud 的 **`Gemini Omni`（`gemini-omni-1.2-flash`）** 生成 AI 视频（无需再次输入或暴露密钥）：
+
+```bash
+# 文生视频（Text-to-Video）
+amk omni --prompt "6 seconds, 16:9 anime cinematic shot, ..." --out ./video.mp4
+
+# 图生视频（Image-to-Video，带起始参考帧）
+amk omni --image ./start.png --prompt "6 seconds, 16:9 anime shot, ..." --out ./video.mp4
+```
+
 ## 会改动哪些文件
 
 - 本工具的数据：默认 `~/.ai-memory-keeper/<profile>/<project-path-hash>/`，另有本工具的安装记录。

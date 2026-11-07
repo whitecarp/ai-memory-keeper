@@ -16,11 +16,12 @@ import { spawnOutside } from './outside.mjs';
 import { beginCycle, cycleStatus } from './cycle.mjs';
 import { enableRule, disableRule, ruleEnabled, ruleMemoryStatus } from './rules.mjs';
 import { compactionFinished, saveLanded, saveFailed, recalled, lateDue, awaitingRecall } from './reply.mjs';
+import { runOmni, OMNI_MODEL } from './omni.mjs';
 
 export function parse(argv) {
   const [command = 'help', ...rest] = argv; const options = {};
   const flags = new Set(['background', 'clear', 'wait', 'terminal', 'cloud', 'rule']);
-  const values = new Set(['project', 'home', 'profile', 'name', 'agent', 'transcript', 'summary', 'model', 'lang', 'owner', 'set', 'file']);
+  const values = new Set(['project', 'home', 'profile', 'name', 'agent', 'transcript', 'summary', 'model', 'lang', 'owner', 'set', 'file', 'prompt', 'out', 'image']);
   for (let i = 0; i < rest.length; i++) {
     if (!rest[i].startsWith('--')) fail('invalid_arguments');
     const key = rest[i].slice(2);
@@ -74,6 +75,7 @@ const HELP = `AI Memory Keeper · amk (also: ai-memory-keeper), Node 22+
   recall [--summary FILE]          Local gap recall, no network
   worker                          Retry/drain existing queued snapshots
   gemini-check [--cloud]          One tiny made-up request; shows each step (needs a key)
+  omni --prompt TEXT --out FILE [--image FILE]  Generate a video via Google Cloud Gemini Omni (uses stored Cloud JSON token)
   overlay --set on|off|preview|preview-alert  Desktop pop-up during compaction (Windows, on by default)
 Options: --project DIR (default: this folder) --home KEEPER_DIR --profile work|companion
          --name LABEL --model gemini-3.8-flash --lang zh|en
@@ -99,6 +101,16 @@ export async function run(argv, dependencies = {}) {
     if (command === 'route') {
       if (options.set) return setRoute(ctx, options.set);
       return { route: routeSetting(ctx) };
+    }
+    if (command === 'omni') {
+      return await runOmni(ctx, {
+        prompt: options.prompt,
+        out: options.out,
+        image: options.image,
+        file: options.file,
+        model: options.model || OMNI_MODEL,
+        fetchImpl: dependencies.fetchImpl || fetch,
+      });
     }
     if (command === 'key') {
       const kind = options.cloud ? 'cloud' : 'studio';

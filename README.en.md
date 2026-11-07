@@ -95,6 +95,18 @@ When saved, the credential is checked with one tiny made-up request; anything Go
 - **Status & check**: `lastSaveVia` in `amk status` shows `studio` or `cloud`. `amk gemini-check --cloud` tests your Google Cloud JSON token or key on its own.
 - **Billing note**: Cloud free-trial credits can't pay for AI Studio's Gemini API, but apply to eligible standard-billed Google Cloud services. Set a budget alert in Cloud Billing first.
 
+### Using the same JSON token to generate videos with Gemini Omni
+
+After deploying AI Memory Keeper and importing your Google Cloud Service Account `.json` key with `amk key --cloud`, you can also ask your agent to read [`skills/gemini-omni/SKILL.md`](skills/gemini-omni/SKILL.md) to guide you through generating AI videos with Google Cloud's **`Gemini Omni` (`gemini-omni-1.2-flash`)** using the same encrypted JSON credential (without ever typing or exposing the key again):
+
+```bash
+# Text-to-Video
+amk omni --prompt "6 seconds, 16:9 anime cinematic shot, ..." --out ./video.mp4
+
+# Image-to-Video (with a reference start frame)
+amk omni --image ./start.png --prompt "6 seconds, 16:9 anime shot, ..." --out ./video.mp4
+```
+
 ## Files it changes
 
 - Its own data: by default `~/.ai-memory-keeper/<profile>/<project-path-hash>/`, plus its own install records.

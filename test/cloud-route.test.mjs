@@ -176,4 +176,23 @@ test('Service Account JSON file: imported via amk key --cloud --file and exchang
   assert.equal(chk.ok, true);
   assert.ok(seen.some(c => c.url.includes('oauth2.googleapis.com/token')));
   assert.ok(seen.some(c => c.url.includes('/projects/cli-proj-456/locations/global/publishers/google/models/gemini-3.8-flash:generateContent') && c.auth === 'Bearer ya29.cli-token'));
+
+  // And `amk omni` reuses the same stored encrypted Service Account JSON to generate a video on Gemini Omni.
+  const fakeVideoB64 = Buffer.alloc(512, 0x42).toString('base64');
+  let omniReq = null;
+  const outMp4 = `${f.home}/test-omni.mp4`;
+  const omniRes = await run(['omni', '--prompt', '6 seconds, 16:9 anime shot', '--out', outMp4, '--project', f.project, '--home', f.home], {
+    fetchImpl: async (url, init) => {
+      omniReq = { url: String(url), auth: init?.headers?.Authorization, body: JSON.parse(init.body) };
+      return reply(200, { outputs: [{ type: 'video', mime_type: 'video/mp4', data: fakeVideoB64 }] });
+    },
+  });
+  assert.equal(omniRes.saved, true);
+  assert.equal(omniRes.model, 'gemini-omni-1.2-flash');
+  assert.equal(omniRes.projectId, 'cli-proj-456');
+  assert.equal(omniRes.bytes, 512);
+  assert.equal(omniReq.url, 'https://aiplatform.googleapis.com/v1beta1/projects/cli-proj-456/locations/global/interactions');
+  assert.equal(omniReq.auth, 'Bearer ya29.cli-token');
+  assert.equal(omniReq.body.model, 'gemini-omni-1.2-flash');
+  assert.equal(fs.statSync(outMp4).size, 512);
 });
